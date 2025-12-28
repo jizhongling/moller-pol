@@ -24,14 +24,14 @@ class DataWF():
         if args.type == 0:
             self.input = root_tree.drop("event", axis=1)
             self.target = root_tree["event"]
-        elif args.type == 1:
-            print("\nReclustering: Using previous labels to filter data\n")
-            # Read labels file and filter for label 13
+        elif args.type == 1 and args.label is not None:
+            print(f"\nReclustering: Using previous labels to filter data with label {args.label}\n")
+            # Read labels file and filter for label arg.label
             labels_df = pd.read_csv("data/labels-type0-method2.txt", sep=' ', header=None, names=['event', 'label'])
-            events_label_13 = labels_df[labels_df['label'] == 13]['event'].values
+            events_label = labels_df[labels_df['label'] == args.label]['event'].values
 
-            # Filter root_tree to only include events with label 13
-            mask = root_tree['event'].isin(events_label_13)
+            # Filter root_tree to only include events with label args.label
+            mask = root_tree['event'].isin(events_label)
             filtered_tree = root_tree[mask]
 
             self.input = filtered_tree.drop("event", axis=1)
@@ -80,6 +80,8 @@ def main():
                         help='number of files for each training (default: 200)')
     parser.add_argument('--method', type=int, default=2, metavar='N',
                         help='classifier (k-means: 0, DBSCAN: 1, HDBSCAN: 2, default: 2)')
+    parser.add_argument('--label', type=int, default=None, metavar='L',
+                        help='label for reclustering (default: None)')
     parser.add_argument('--seed', type=int, default=None, metavar='S',
                         help='random seed (default: None)')
     parser.add_argument('--norm', action='store_true', default=False,

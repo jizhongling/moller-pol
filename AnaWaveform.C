@@ -7,6 +7,7 @@ void AnaWaveform(const Int_t proc = 0)
   const UInt_t slot = 3;
   const UInt_t NUMSAMPLE = 240 / 4;
   const UInt_t threshold = 50;
+  const UInt_t peak_cut = 150;
 
   const Int_t np = 3;
   Int_t ntp_event, ntp_time[4][np], ntp_peak[4][np], ntp_fwzm[4][np], ntp_area[4][np], ntp_diff[6][np];
@@ -215,7 +216,7 @@ void AnaWaveform(const Int_t proc = 0)
         // detect local maxima (simple 1-sample neighbor check)
         if (is > 0 && is < (Int_t)NUMSAMPLE - 1)
         {
-          if (store_sample[is] - ped > threshold &&
+          if (store_sample[is] - ped > peak_cut &&
               store_sample[is] > store_sample[is - 1] &&
               store_sample[is] > store_sample[is + 1])
           {
@@ -254,7 +255,7 @@ void AnaWaveform(const Int_t proc = 0)
         sum_sample[store_channel] += store_sample[is] - ped;
       } // is
 
-      if (max_sample[store_channel] > threshold)
+      if (max_sample[store_channel] > peak_cut)
       {
         fadc_channel++;
         trig[store_channel / 4] = true;
