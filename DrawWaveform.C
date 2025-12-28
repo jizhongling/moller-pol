@@ -28,11 +28,12 @@ void DrawWaveform()
   Int_t event, label;
   map<Int_t, Int_t> event_label;
   multimap<Int_t, Int_t> label_event;
+  map<Int_t, Int_t> label_count;
   const Int_t method[2] = {2, 0};
 
   for (Int_t type = 1; type >= 0; type--)
   {
-    TString label_file = Form("data/labels-type%d-method%d.txt", type,  method[type]);
+    TString label_file = Form("data/labels-type%d-method%d.txt", type, method[type]);
     infile.open(label_file.Data());
     if (!infile.is_open())
       continue;
@@ -44,12 +45,11 @@ void DrawWaveform()
           label += 100;
         event_label[event] = label;
         label_event.insert(pair<Int_t, Int_t>(label, event));
+        if (label_count.find(label) == label_count.end())
+          label_count[label] = 1;
       }
     infile.close();
   }
-
-  set<Int_t> printed_labels;
-  map<Int_t, bool> pdf_started;
 
   auto f = new TFile(Form("Rootfiles/fadc_data_%d.root", runnumber));
   TDirectory *dir = (TDirectory *)f->Get(Form("/mode_%d_data/slot_%u", mode, slot));
@@ -102,7 +102,6 @@ void DrawWaveform()
           continue;
         Int_t label = event_label[store_event];
 
-        printed_labels.insert(label);
         auto ctmp = new TCanvas(Form("c_label%d_event%u", label, store_event), Form("c_label%d_event%u", label, store_event), 600, 600);
         ctmp->cd();
         auto leg0 = new TLegend(0.1, 0.65, 0.25, 0.9);
@@ -121,15 +120,11 @@ void DrawWaveform()
         leg0->Draw();
 
         // cout << "Event " << store_event << ", Label " << label << endl;
-        if (pdf_started.find(label) == pdf_started.end() || !pdf_started[label])
-        {
+        if (label_count[label] == 1)
           ctmp->Print(wavefile + Form("-label%d.pdf(", label));
-          pdf_started[label] = true;
-        }
         else
-        {
           ctmp->Print(wavefile + Form("-label%d.pdf", label));
-        }
+        label_count[label]++;
         ctmp->Close();
         delete ctmp;
         delete leg0;
@@ -207,17 +202,75 @@ void DrawWaveform()
     total_channel++;
   } // ien
 
-  TString file_list;
-  for (const Int_t label : printed_labels)
+  // Build Table of Contents based on label_count and render as a ROOT page
+  // Compute start page for each label in the final combined PDF (TOC occupies page 1)
+  const Int_t toc_pages = 1;
+  std::map<Int_t, Int_t> label_start_page;
+  Int_t current_page = toc_pages + 1; // first label starts after TOC
+  for (auto const &kv : label_count)
   {
-    if (pdf_started.find(label) != pdf_started.end() && pdf_started[label])
+    Int_t label = kv.first;
+    Int_t cnt = kv.second;
+    if (cnt > 1)
     {
+      label_start_page[label] = current_page;
+      current_page += cnt;
+    }
+  }
+
+  // Create TOC canvas
+  TString tocfile = wavefile + "-TOC.pdf";
+  if (!label_start_page.empty())
+  {
+    auto c_toc = new TCanvas("c_toc", "Table of Contents", 600, 600);
+    c_toc->cd();
+
+    auto pave = new TPaveText(0.02, 0.02, 0.95, 0.95, "NDC");
+    pave->SetFillColor(0);
+    pave->SetBorderSize(1);
+    pave->SetTextAlign(12); // left-middle
+    pave->SetTextFont(42);
+
+    // Column headers
+    auto col1 = new TText(0.06, 0.97, "Label");
+    col1->SetTextFont(62);
+    col1->SetTextSize(0.028);
+    col1->SetNDC();
+    col1->Draw();
+    auto col2 = new TText(0.20, 0.97, "Start Page");
+    col2->SetTextFont(62);
+    col2->SetTextSize(0.028);
+    col2->SetNDC();
+    col2->Draw();
+
+    // Entries
+    pave->SetTextSize(0.022);
+    for (auto const &kv : label_start_page)
+    {
+      Int_t label = kv.first;
+      Int_t start = kv.second;
+      pave->AddText(Form("%6d                 %6d", label, start));
+    }
+
+    pave->Draw();
+    c_toc->Print(tocfile);
+    c_toc->Close();
+    delete c_toc;
+    delete pave;
+    delete col1;
+    delete col2;
+  }
+
+  TString file_list = tocfile + " ";
+  for (const auto &kv : label_count)
+    if (kv.second > 1)
+    {
+      Int_t label = kv.first;
       auto cclose = new TCanvas(Form("c_close_label%d", label), "", 1, 1);
       cclose->Print(wavefile + Form("-label%d.pdf)", label));
       delete cclose;
       file_list += wavefile + Form("-label%d.pdf ", label);
     }
-  }
   gSystem->Exec(Form("pdfunite %s %s.pdf", file_list.Data(), wavefile.Data()));
   gSystem->Exec(Form("rm %s", file_list.Data()));
 
