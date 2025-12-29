@@ -2,6 +2,8 @@ void DrawWaveform()
 {
   gErrorIgnoreLevel = kError;
   Int_t runnumber = 242;
+  const Int_t method[2] = {2, 0}; // Cluster with method[0], recluster with method[1]
+  const Int_t start_type = 1;     // 0: Do not recluster; 1: Recluster with method[1]
 
   const Int_t mode = 10;
   const UInt_t slot = 3;
@@ -29,9 +31,8 @@ void DrawWaveform()
   map<Int_t, Int_t> event_label;
   multimap<Int_t, Int_t> label_event;
   map<Int_t, Int_t> label_count;
-  const Int_t method[2] = {2, 0};
 
-  for (Int_t type = 1; type >= 0; type--)
+  for (Int_t type = start_type; type >= 0; type--)
   {
     TString label_file = Form("data/labels-type%d-method%d.txt", type, method[type]);
     infile.open(label_file.Data());

@@ -2,6 +2,7 @@ void AnaWaveform(const Int_t proc = 0)
 {
   gErrorIgnoreLevel = kWarning;
   Int_t runnumber = 242;
+  const bool normalize = false;
 
   const Int_t mode = 10;
   const UInt_t slot = 3;
@@ -159,14 +160,15 @@ void AnaWaveform(const Int_t proc = 0)
             ntp_diff[5][ip] = TMath::Abs(ntp_time[1][ip] - ntp_time[2][ip]);
         }
 
-        for (Int_t ich = 0; ich < 4; ich++)
-          for (size_t ip = 0; ip < np; ip++)
-          {
-            ntp_time[ich][ip] /= 10;
-            ntp_peak[ich][ip] /= 500;
-            ntp_fwzm[ich][ip] /= 3;
-            ntp_area[ich][ip] /= 1000;
-          }
+        if (normalize)
+          for (Int_t ich = 0; ich < 4; ich++)
+            for (size_t ip = 0; ip < np; ip++)
+            {
+              ntp_time[ich][ip] /= 10;
+              ntp_peak[ich][ip] /= 500;
+              ntp_fwzm[ich][ip] /= 3;
+              ntp_area[ich][ip] /= 1000;
+            }
 
         t_out->Fill();
         v_channel.clear();
