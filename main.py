@@ -375,7 +375,9 @@ def train_vae(vae, X_train, epochs=50, batch_size=64, learning_rate=1e-3):
 def train(args, model, X_train, y_train):
     model.fit(X_train)
     labels = model.labels_
-    with open(f"data/labels-type{args.type}-method{args.method}.txt", "w") as f:
+    os.makedirs("data", exist_ok=True)
+    labels_path = f"data/labels-type{args.type}-method{args.method}.txt"
+    with open(labels_path, "w") as f:
         for i in range(len(labels)):
             f.write(f"{y_train.iloc[i]} {labels[i]}\n")
 

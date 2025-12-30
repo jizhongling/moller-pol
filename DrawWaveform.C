@@ -226,14 +226,14 @@ void DrawWaveform()
     auto c_toc = new TCanvas("c_toc", "Table of Contents", 600, 600);
     c_toc->cd();
 
-    auto pave = new TPaveText(0.02, 0.02, 0.95, 0.95, "NDC");
+    auto pave = new TPaveText(0.02, 0.02, 0.98, 0.95, "NDC");
     pave->SetFillColor(0);
     pave->SetBorderSize(1);
     pave->SetTextAlign(12); // left-middle
     pave->SetTextFont(42);
 
     // Column headers
-    auto col1 = new TText(0.06, 0.97, "Label");
+    auto col1 = new TText(0.07, 0.97, "Label");
     col1->SetTextFont(62);
     col1->SetTextSize(0.028);
     col1->SetNDC();
