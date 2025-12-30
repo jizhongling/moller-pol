@@ -5,7 +5,7 @@ void DrawWaveform()
   const Int_t method[2] = {2, 0}; // Cluster with method[0], recluster with method[1]
   const Int_t start_type = 1;     // 0: Do not recluster; 1: Recluster with method[1]
 
-  const Int_t mode = 10;
+  const UInt_t mode = 10;
   const UInt_t slot = 3;
   const UInt_t NUMSAMPLE = 240 / 4;
   const UInt_t ns0 = 40;
@@ -53,7 +53,7 @@ void DrawWaveform()
   }
 
   auto f = new TFile(Form("Rootfiles/fadc_data_%d.root", runnumber));
-  TDirectory *dir = (TDirectory *)f->Get(Form("/mode_%d_data/slot_%u", mode, slot));
+  TDirectory *dir = (TDirectory *)f->Get(Form("/mode_%u_data/slot_%u", mode, slot));
   TTree *t_store = (TTree *)dir->Get("waveform");
   UInt_t store_event, store_channel, store_sample[100];
   t_store->SetBranchAddress("event", &store_event);

@@ -4,7 +4,7 @@ void AnaWaveform(const Int_t proc = 0)
   Int_t runnumber = 242;
   const bool normalize = false;
 
-  const Int_t mode = 10;
+  const UInt_t mode = 10;
   const UInt_t slot = 3;
   const UInt_t NUMSAMPLE = 240 / 4;
   const UInt_t threshold = 50;
@@ -31,7 +31,7 @@ void AnaWaveform(const Int_t proc = 0)
       t_out->Branch(Form("diff_ch%d_p%d", ich, ip), &ntp_diff[ich][ip], Form("diff_ch%d_p%d/I", ich, ip));
 
   auto f = new TFile(Form("Rootfiles/fadc_data_%d.root", runnumber));
-  TDirectory *dir = (TDirectory *)f->Get(Form("/mode_%d_data/slot_%u", mode, slot));
+  TDirectory *dir = (TDirectory *)f->Get(Form("/mode_%u_data/slot_%u", mode, slot));
   TTree *t_store = (TTree *)dir->Get("waveform");
   UInt_t store_event, store_channel, store_sample[100];
   t_store->SetBranchAddress("event", &store_event);
