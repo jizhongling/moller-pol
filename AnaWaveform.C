@@ -11,24 +11,24 @@ void AnaWaveform(const Int_t proc = 0)
   const UInt_t peak_cut = 150;
 
   const Int_t np = 3;
-  Int_t ntp_event, ntp_time[4][np], ntp_peak[4][np], ntp_fwzm[4][np], ntp_area[4][np], ntp_diff[6][np];
+  Int_t ntp_event, ntp_sample[4][NUMSAMPLE], ntp_time[4][np], ntp_peak[4][np], ntp_fwzm[4][np], ntp_area[4][np], ntp_diff[6][np];
   auto f_out = new TFile(Form("data/training-%d.root", proc), "RECREATE");
   auto t_out = new TTree("T", "Waveform data");
   t_out->Branch("event", &ntp_event, "event/I");
-  for (Int_t ip = 0; ip < np; ip++)
+  for (Int_t ich = 0; ich < 4; ich++)
   {
-    for (Int_t ich = 0; ich < 4; ich++)
+    t_out->Branch(Form("sample_ch%d", ich), (Int_t *)ntp_sample[ich], Form("sample_ch%d[%d]/I", ich, NUMSAMPLE));
+    for (Int_t ip = 0; ip < np; ip++)
     {
       t_out->Branch(Form("time_ch%d_p%d", ich, ip), &ntp_time[ich][ip], Form("time_ch%d_p%d/I", ich, ip));
       t_out->Branch(Form("peak_ch%d_p%d", ich, ip), &ntp_peak[ich][ip], Form("peak_ch%d_p%d/I", ich, ip));
       t_out->Branch(Form("fwzm_ch%d_p%d", ich, ip), &ntp_fwzm[ich][ip], Form("fwzm_ch%d_p%d/I", ich, ip));
       t_out->Branch(Form("area_ch%d_p%d", ich, ip), &ntp_area[ich][ip], Form("area_ch%d_p%d/I", ich, ip));
     }
-    for (Int_t ich = 0; ich < 6; ich++)
-    {
-      t_out->Branch(Form("diff_ch%d_p%d", ich, ip), &ntp_diff[ich][ip], Form("diff_ch%d_p%d/I", ich, ip));
-    }
   }
+  for (Int_t ich = 0; ich < 6; ich++)
+    for (Int_t ip = 0; ip < np; ip++)
+      t_out->Branch(Form("diff_ch%d_p%d", ich, ip), &ntp_diff[ich][ip], Form("diff_ch%d_p%d/I", ich, ip));
 
   auto f = new TFile(Form("Rootfiles/fadc_data_%d.root", runnumber));
   TDirectory *dir = (TDirectory *)f->Get(Form("/mode_%d_data/slot_%u", mode, slot));
@@ -43,6 +43,7 @@ void AnaWaveform(const Int_t proc = 0)
   UInt_t fadc_channel = 0;
   vector<UInt_t> v_channel;
   // per-event peak storage: for each of 8 channels store local-peak indices and values
+  vector<vector<Int_t>> sample(8);
   vector<vector<Int_t>> time(8);
   vector<vector<Int_t>> peak(8);
   vector<vector<Int_t>> fwzm(8);
@@ -52,20 +53,21 @@ void AnaWaveform(const Int_t proc = 0)
   Float_t sum_sample[8] = {};
   bool trig[2] = {};
 
-  for (Int_t ip = 0; ip < np; ip++)
+  for (Int_t ic = 0; ic < 4; ic++)
   {
-    for (Int_t ic = 0; ic < 4; ic++)
+    for (Int_t is = 0; is < NUMSAMPLE; is++)
+      ntp_sample[ic][is] = 0;
+    for (Int_t ip = 0; ip < np; ip++)
     {
       ntp_time[ic][ip] = 0;
       ntp_peak[ic][ip] = 0;
       ntp_fwzm[ic][ip] = 0;
       ntp_area[ic][ip] = 0;
     }
-    for (Int_t ic = 0; ic < 6; ic++)
-    {
-      ntp_diff[ic][ip] = 0;
-    }
   }
+  for (Int_t ic = 0; ic < 6; ic++)
+    for (Int_t ip = 0; ip < np; ip++)
+      ntp_diff[ic][ip] = 0;
 
   for (ULong64_t ien = 0; ien < t_store->GetEntries(); ien++)
   {
@@ -132,6 +134,8 @@ void AnaWaveform(const Int_t proc = 0)
             }
 
             ntp_event = store_event;
+            for (Int_t is = 0; is < NUMSAMPLE; is++)
+              ntp_sample[ntp_chan][is] = sample[chan].at(is);
             for (size_t ip = 0; ip < time[chan].size() && ip < np; ip++)
             {
               ntp_time[ntp_chan][ip] = time[chan].at(ip);
@@ -182,25 +186,27 @@ void AnaWaveform(const Int_t proc = 0)
         max_sample[ic] = 0;
         sum_sample[ic] = 0;
         // clear any stored peaks for this channel for the next event
+        sample[ic].clear();
         time[ic].clear();
         peak[ic].clear();
         fwzm[ic].clear();
         area[ic].clear();
       }
-      for (Int_t ip = 0; ip < np; ip++)
+      for (Int_t ic = 0; ic < 4; ic++)
       {
-        for (Int_t ic = 0; ic < 4; ic++)
+        for (Int_t is = 0; is < NUMSAMPLE; is++)
+          ntp_sample[ic][is] = 0;
+        for (Int_t ip = 0; ip < np; ip++)
         {
           ntp_time[ic][ip] = 0;
           ntp_peak[ic][ip] = 0;
           ntp_fwzm[ic][ip] = 0;
           ntp_area[ic][ip] = 0;
         }
-        for (Int_t ic = 0; ic < 6; ic++)
-        {
-          ntp_diff[ic][ip] = 0;
-        }
       }
+      for (Int_t ic = 0; ic < 6; ic++)
+        for (Int_t ip = 0; ip < np; ip++)
+          ntp_diff[ic][ip] = 0;
       for (Int_t it = 0; it < 2; it++)
         trig[it] = 0;
     } // new event
@@ -215,6 +221,7 @@ void AnaWaveform(const Int_t proc = 0)
 
       for (Int_t is = 0; is < NUMSAMPLE; is++)
       {
+        sample[store_channel].push_back(store_sample[is] - ped);
         // detect local maxima (simple 1-sample neighbor check)
         if (is > 0 && is < (Int_t)NUMSAMPLE - 1)
         {
