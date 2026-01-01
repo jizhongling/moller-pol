@@ -277,6 +277,15 @@ void DrawWaveform()
 
   cout << "OR event = " << event_1or2 << "; AND event = " << event_1and2 << endl;
 
+  // Print instruction for adding clickable TOC links (run outside container)
+  if (!label_start_page.empty())
+  {
+    cout << "\n==================================================" << endl;
+    cout << "To add clickable links to TOC, run this command:" << endl;
+    cout << "  python add_toc_links.py " << wavefile << ".pdf 0" << endl;
+    cout << "==================================================" << endl;
+  }
+
   TString specfile = Form("plots/Spectrum-run%d-%dto%dns.pdf", runnumber, ns0, ns1);
   auto c1 = new TCanvas("c1", "c1", 4 * 600, 2 * 600);
   c1->Divide(4, 2);
