@@ -67,24 +67,24 @@ def add_toc_links(input_pdf, toc_page_index=0):
     # Convert NDC to page coordinates
     
     # Starting position for entries (below headers)
-    start_x_ndc = 0.05 + 0.30 / label_count # X position for page numbers (top-down)
-    page_num_height_ndc = 0.025  # Height to cover page numbers
-    line_height_ndc = 0.60 / label_count  # Approximate spacing between lines
+    start_x_ndc = 0.067 + 0.425 / label_count # X position for page numbers (top-down)
+    page_num_width_ndc = 0.025  # Height to cover page numbers
+    line_width_ndc = 0.85 / label_count  # Approximate spacing between lines
     
     # Page number column position
-    page_num_y_ndc = 0.36  # Y position for first entry (left-right)
-    page_num_width_ndc = 0.025  # Width to cover page numbers
+    page_num_y_ndc = 0.353  # Y position for first entry (left-right)
+    page_num_height_ndc = 0.035  # Width to cover page numbers
     
     # Add link annotations for each page number
     for idx, (label, target_page) in enumerate(label_page_map):
         # Calculate x position for this entry (top-down)
-        x_ndc = start_x_ndc + (idx * line_height_ndc)
+        x_ndc = start_x_ndc + (idx * line_width_ndc)
         
         # Convert NDC to PDF coordinates (PDF origin is top-left)
-        x0 = x_ndc * page_height
+        x0 = x_ndc * page_width
         y0 = page_num_y_ndc * page_height
-        x1 = x0 + (page_num_height_ndc * page_width)
-        y1 = y0 + (page_num_width_ndc * page_height)
+        x1 = x0 + (page_num_width_ndc * page_width)
+        y1 = y0 + (page_num_height_ndc * page_height)
         
         # Create link annotation
         link_rect = RectangleObject([x0, y0, x1, y1])
