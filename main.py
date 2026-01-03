@@ -52,11 +52,9 @@ class DataWF():
             else:
                 sys.exit("\nError: Wrong type number\n")
         else:
-            # Load feature data (fwzm, area, diff) for clustering
+            # Load feature data (area, diff) for clustering
             print("\nLoading feature data for clustering\n")
             branch = ["event"]
-            if args.type == 0:
-                branch += [f"fwzm_ch{ich}_p{ip}" for ich in range(4) for ip in range(3)]
             branch += [f"area_ch{ich}_p{ip}" for ich in range(4) for ip in range(3)]
             branch += [f"diff_ch{ich}_p{ip}" for ich in range(6) for ip in range(3)]
             root_tree = ur.concatenate(files, branch, library='pd')

@@ -24,7 +24,7 @@ void DrawDistributions()
   TObjArray *branches = tree->GetListOfBranches();
 
   // Collect branch names matching our patterns
-  vector<TString> time_branches, area_branches, fwzm_branches;
+  vector<TString> time_branches, area_branches, fwhm_branches;
 
   for (Int_t i = 0; i < branches->GetEntries(); i++)
   {
@@ -37,15 +37,15 @@ void DrawDistributions()
     {
       area_branches.push_back(branch_name);
     }
-    else if (branch_name.BeginsWith("fwzm_"))
+    else if (branch_name.BeginsWith("fwhm_"))
     {
-      fwzm_branches.push_back(branch_name);
+      fwhm_branches.push_back(branch_name);
     }
   }
 
   cout << "Found " << time_branches.size() << " time branches" << endl;
   cout << "Found " << area_branches.size() << " area branches" << endl;
-  cout << "Found " << fwzm_branches.size() << " fwzm branches" << endl;
+  cout << "Found " << fwhm_branches.size() << " fwhm branches" << endl;
 
   // Create canvas
   auto c = new TCanvas("c", "Distributions", 600, 600);
@@ -104,10 +104,10 @@ void DrawDistributions()
     }
   }
 
-  // Plot fwzm branches
-  for (size_t i = 0; i < fwzm_branches.size(); i++)
+  // Plot fwhm branches
+  for (size_t i = 0; i < fwhm_branches.size(); i++)
   {
-    auto &branch_name = fwzm_branches[i];
+    auto &branch_name = fwhm_branches[i];
     tree->Draw(Form("%s>>h_%s", branch_name.Data(), branch_name.Data()), "", "");
     TH1F *h = (TH1F *)gDirectory->Get(Form("h_%s", branch_name.Data()));
     if (h)
@@ -119,7 +119,7 @@ void DrawDistributions()
       c->Update();
 
       // Close PDF on the last page
-      if (i == fwzm_branches.size() - 1)
+      if (i == fwhm_branches.size() - 1)
       {
         c->Print(Form("%s)", pdf_name.Data()));
       }

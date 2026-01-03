@@ -11,7 +11,7 @@ void AnaWaveform(const Int_t proc = 0)
   const UInt_t peak_cut = 150;
 
   const Int_t np = 3;
-  Int_t ntp_event, ntp_sample[4][NUMSAMPLE], ntp_time[4][np], ntp_peak[4][np], ntp_fwzm[4][np], ntp_area[4][np], ntp_diff[6][np];
+  Int_t ntp_event, ntp_sample[4][NUMSAMPLE], ntp_time[4][np], ntp_peak[4][np], ntp_fwhm[4][np], ntp_area[4][np], ntp_diff[6][np];
   auto f_out = new TFile(Form("data/training-%d.root", proc), "RECREATE");
   auto t_out = new TTree("T", "Waveform data");
   t_out->Branch("event", &ntp_event, "event/I");
@@ -22,7 +22,7 @@ void AnaWaveform(const Int_t proc = 0)
     {
       t_out->Branch(Form("time_ch%d_p%d", ich, ip), &ntp_time[ich][ip], Form("time_ch%d_p%d/I", ich, ip));
       t_out->Branch(Form("peak_ch%d_p%d", ich, ip), &ntp_peak[ich][ip], Form("peak_ch%d_p%d/I", ich, ip));
-      t_out->Branch(Form("fwzm_ch%d_p%d", ich, ip), &ntp_fwzm[ich][ip], Form("fwzm_ch%d_p%d/I", ich, ip));
+      t_out->Branch(Form("fwhm_ch%d_p%d", ich, ip), &ntp_fwhm[ich][ip], Form("fwhm_ch%d_p%d/I", ich, ip));
       t_out->Branch(Form("area_ch%d_p%d", ich, ip), &ntp_area[ich][ip], Form("area_ch%d_p%d/I", ich, ip));
     }
   }
@@ -46,7 +46,7 @@ void AnaWaveform(const Int_t proc = 0)
   vector<vector<Int_t>> sample(8);
   vector<vector<Int_t>> time(8);
   vector<vector<Int_t>> peak(8);
-  vector<vector<Int_t>> fwzm(8);
+  vector<vector<Int_t>> fwhm(8);
   vector<vector<Int_t>> area(8);
   UInt_t max_index[8] = {};
   UInt_t max_sample[8] = {};
@@ -61,7 +61,7 @@ void AnaWaveform(const Int_t proc = 0)
     {
       ntp_time[ic][ip] = 0;
       ntp_peak[ic][ip] = 0;
-      ntp_fwzm[ic][ip] = 0;
+      ntp_fwhm[ic][ip] = 0;
       ntp_area[ic][ip] = 0;
     }
   }
@@ -140,7 +140,7 @@ void AnaWaveform(const Int_t proc = 0)
             {
               ntp_time[ntp_chan][ip] = time[chan].at(ip);
               ntp_peak[ntp_chan][ip] = peak[chan].at(ip);
-              ntp_fwzm[ntp_chan][ip] = fwzm[chan].at(ip);
+              ntp_fwhm[ntp_chan][ip] = fwhm[chan].at(ip);
               ntp_area[ntp_chan][ip] = area[chan].at(ip);
             }
           } // time[chan].size() > 0
@@ -170,7 +170,7 @@ void AnaWaveform(const Int_t proc = 0)
             {
               ntp_time[ich][ip] /= 10;
               ntp_peak[ich][ip] /= 500;
-              ntp_fwzm[ich][ip] /= 3;
+              ntp_fwhm[ich][ip] /= 1;
               ntp_area[ich][ip] /= 1000;
             }
 
@@ -189,7 +189,7 @@ void AnaWaveform(const Int_t proc = 0)
         sample[ic].clear();
         time[ic].clear();
         peak[ic].clear();
-        fwzm[ic].clear();
+        fwhm[ic].clear();
         area[ic].clear();
       }
       for (Int_t ic = 0; ic < 4; ic++)
@@ -200,7 +200,7 @@ void AnaWaveform(const Int_t proc = 0)
         {
           ntp_time[ic][ip] = 0;
           ntp_peak[ic][ip] = 0;
-          ntp_fwzm[ic][ip] = 0;
+          ntp_fwhm[ic][ip] = 0;
           ntp_area[ic][ip] = 0;
         }
       }
@@ -236,7 +236,7 @@ void AnaWaveform(const Int_t proc = 0)
             for (Int_t id = 0; id < NUMSAMPLE; id++)
               if (is - id >= 0 && is - id < (Int_t)NUMSAMPLE)
               {
-                if (store_sample[is - id] - ped > threshold)
+                if (store_sample[is - id] - ped > (store_sample[is] - ped) / 2)
                   ld++;
                 else
                   break;
@@ -244,14 +244,15 @@ void AnaWaveform(const Int_t proc = 0)
             for (Int_t id = 0; id < NUMSAMPLE; id++)
               if (is + id >= 0 && is + id < (Int_t)NUMSAMPLE)
               {
-                if (store_sample[is + id] - ped > threshold)
+                if (store_sample[is + id] - ped > (store_sample[is] - ped) / 2)
                   rd++;
                 else
                   break;
               }
-            fwzm[store_channel].push_back(rd - ld);
-            for (Int_t id = -ld + 1; id < rd; id++)
-              sum_area += store_sample[is + id] - ped;
+            fwhm[store_channel].push_back(rd - ld);
+            for (Int_t id = -2 * ld; id <= 2 * rd; id++)
+              if (is + id >= 0 && is + id < (Int_t)NUMSAMPLE)
+                sum_area += store_sample[is + id] - ped;
             area[store_channel].push_back(sum_area);
           }
         }

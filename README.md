@@ -6,10 +6,10 @@
 - Visualize clustered waveforms, summed spectra, and feature distributions.
 
 ## Components
-- Feature extraction (ROOT C++): [AnaWaveform.C](AnaWaveform.C) writes [data/training-*.root](data) with per-peak time/peak/fwzm/area and timing differences between channels.
+- Feature extraction (ROOT C++): [AnaWaveform.C](AnaWaveform.C) writes [data/training-*.root](data) with per-peak time/peak/fwhm/area and timing differences between channels.
 - Clustering and dimensionality reduction (Python): [main.py](main.py) loads ROOT features or full waveforms (for AE/VAE), applies normalization/PCA/UMAP/AE/VAE, and clusters via KMeans/DBSCAN/HDBSCAN; outputs labels to [data/labels-type{0|1}-method*.txt](data).
 - Waveform visualization (ROOT C++): [DrawWaveform.C](DrawWaveform.C) overlays labels on waveforms and exports PDFs plus summed spectra.
-- Feature distributions (ROOT C++): [DrawDistributions.C](DrawDistributions.C) plots histograms for time/area/fwzm branches.
+- Feature distributions (ROOT C++): [DrawDistributions.C](DrawDistributions.C) plots histograms for time/area/fwhm branches.
 
 ## Data Flow
 1. Raw data: Root files in [Rootfiles](Rootfiles) (tree `waveform` under `/mode_10_data/slot_3`).
