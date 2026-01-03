@@ -133,15 +133,25 @@ void AnaWaveform(const Int_t proc = 0)
               }
             }
 
+            auto &va = area[chan];
+            vector<size_t> idx(va.size());
+            iota(idx.begin(), idx.end(), 0);
+            sort(idx.begin(), idx.end(),
+                 [&va](size_t i1, size_t i2)
+                 {
+                   return va.at(i1) > va.at(i2);
+                 });
+
             ntp_event = store_event;
             for (Int_t is = 0; is < NUMSAMPLE; is++)
               ntp_sample[ntp_chan][is] = sample[chan].at(is);
-            for (size_t ip = 0; ip < time[chan].size() && ip < np; ip++)
+            for (size_t ip = 0; ip < idx.size() && ip < np; ip++)
             {
-              ntp_time[ntp_chan][ip] = time[chan].at(ip);
-              ntp_peak[ntp_chan][ip] = peak[chan].at(ip);
-              ntp_fwhm[ntp_chan][ip] = fwhm[chan].at(ip);
-              ntp_area[ntp_chan][ip] = area[chan].at(ip);
+              UInt_t ip_sorted = idx.at(ip);
+              ntp_time[ntp_chan][ip] = max(time[chan].at(ip_sorted), 0);
+              ntp_peak[ntp_chan][ip] = max(peak[chan].at(ip_sorted), 0);
+              ntp_fwhm[ntp_chan][ip] = max(fwhm[chan].at(ip_sorted), 0);
+              ntp_area[ntp_chan][ip] = max(area[chan].at(ip_sorted), 0);
             }
           } // time[chan].size() > 0
         } // ich

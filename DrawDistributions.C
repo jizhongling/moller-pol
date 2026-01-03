@@ -50,6 +50,7 @@ void DrawDistributions()
   // Create canvas
   auto c = new TCanvas("c", "Distributions", 600, 600);
   c->SetGrid();
+  c->SetLogy();
 
   TString pdf_name = Form("plots/Distributions-run%d.pdf", runnumber);
   Int_t page_count = 0;
