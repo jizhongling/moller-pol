@@ -2,6 +2,36 @@ void DrawDistributions()
 {
   gErrorIgnoreLevel = kWarning;
   Int_t runnumber = 242;
+  const Int_t method[2] = {2, 0}; // Cluster with method[0], recluster with method[1]
+  const Int_t start_type = 0;     // 0: Do not recluster; 1: Recluster with method[1]
+
+  // Read labels from file
+  ifstream infile;
+  Int_t event, label;
+  map<Int_t, Int_t> event_label;
+  set<Int_t> unique_labels;
+
+  for (Int_t type = start_type; type >= 0; type--)
+  {
+    TString label_file = Form("data/labels-type%d-method%d.txt", type, method[type]);
+    infile.open(label_file.Data());
+    if (!infile.is_open())
+      continue;
+    cout << "Open labels file: " << label_file << endl;
+    while (infile >> event >> label)
+    {
+      if (event_label.find(event) == event_label.end())
+      {
+        if (type == 1)
+          label += 100;
+        event_label[event] = label;
+        unique_labels.insert(label);
+      }
+    }
+    infile.close();
+  }
+
+  cout << "Found " << unique_labels.size() << " unique labels" << endl;
 
   // Open the ROOT file
   auto f = new TFile("data/training-0.root", "READ");
@@ -20,126 +50,140 @@ void DrawDistributions()
     return;
   }
 
-  // Get list of branches
-  TObjArray *branches = tree->GetListOfBranches();
+  // Set up branch addresses
+  Int_t tree_event;
+  tree->SetBranchAddress("event", &tree_event);
 
-  // Collect branch names matching our patterns
-  vector<TString> time_branches, area_branches, fwhm_branches;
-
-  for (Int_t i = 0; i < branches->GetEntries(); i++)
+  // Build branch name lists for Gaussian parameters
+  const Int_t chlist[4] = {0, 1, 4, 5};
+  vector<TString> amplitude_branches, mean_branches, sigma_branches;
+  for (Int_t ich = 0; ich < 4; ich++)
   {
-    TString branch_name = branches->At(i)->GetName();
-    if (branch_name.BeginsWith("time_"))
+    for (Int_t ip = 0; ip < 2; ip++)
     {
-      time_branches.push_back(branch_name);
-    }
-    else if (branch_name.BeginsWith("area_"))
-    {
-      area_branches.push_back(branch_name);
-    }
-    else if (branch_name.BeginsWith("fwhm_"))
-    {
-      fwhm_branches.push_back(branch_name);
+      amplitude_branches.push_back(Form("plot_amplitude_ch%d_p%d", chlist[ich], ip));
+      mean_branches.push_back(Form("plot_mean_ch%d_p%d", chlist[ich], ip));
+      sigma_branches.push_back(Form("plot_sigma_ch%d_p%d", chlist[ich], ip));
     }
   }
 
-  cout << "Found " << time_branches.size() << " time branches" << endl;
-  cout << "Found " << area_branches.size() << " area branches" << endl;
-  cout << "Found " << fwhm_branches.size() << " fwhm branches" << endl;
+  cout << "Will plot " << amplitude_branches.size() << " amplitude, mean, and sigma distributions per label" << endl;
 
-  // Create canvas
+  TString pdf_name = Form("plots/Distributions-run%d-method%d-method%d.pdf", runnumber, method[0], method[1]);
   auto c = new TCanvas("c", "Distributions", 600, 600);
   c->SetGrid();
   c->SetLogy();
 
-  TString pdf_name = Form("plots/Distributions-run%d.pdf", runnumber);
   Int_t page_count = 0;
 
-  // Plot time branches
-  for (auto &branch_name : time_branches)
+  // Loop over each label
+  for (auto label_id : unique_labels)
   {
-    tree->Draw(Form("%s>>h_%s", branch_name.Data(), branch_name.Data()), "", "");
-    TH1F *h = (TH1F *)gDirectory->Get(Form("h_%s", branch_name.Data()));
-    if (h)
-    {
-      h->SetTitle(Form("%s Distribution;%s;Counts", branch_name.Data(), branch_name.Data()));
-      h->SetLineColor(kBlue);
-      h->SetLineWidth(2);
-      h->Draw();
-      c->Update();
+    cout << "Processing label " << label_id << endl;
 
-      if (page_count == 0)
+    // Build event list for this label
+    vector<Long64_t> event_indices;
+    for (Long64_t i = 0; i < tree->GetEntries(); i++)
+    {
+      tree->GetEntry(i);
+      if (event_label.find(tree_event) != event_label.end() && event_label[tree_event] == label_id)
       {
-        c->Print(Form("%s(", pdf_name.Data()));
+        event_indices.push_back(i);
       }
-      else
-      {
-        c->Print(pdf_name.Data());
-      }
-      page_count++;
     }
-  }
 
-  // Plot area branches
-  for (auto &branch_name : area_branches)
-  {
-    tree->Draw(Form("%s>>h_%s", branch_name.Data(), branch_name.Data()), "", "");
-    TH1F *h = (TH1F *)gDirectory->Get(Form("h_%s", branch_name.Data()));
-    if (h)
+    if (event_indices.empty())
     {
-      h->SetTitle(Form("%s Distribution;%s;Counts", branch_name.Data(), branch_name.Data()));
-      h->SetLineColor(kRed);
-      h->SetLineWidth(2);
-      h->Draw();
-      c->Update();
-
-      if (page_count == 0)
-      {
-        c->Print(Form("%s(", pdf_name.Data()));
-      }
-      else
-      {
-        c->Print(pdf_name.Data());
-      }
-      page_count++;
+      cout << "  No events found for label " << label_id << endl;
+      continue;
     }
-  }
 
-  // Plot fwhm branches
-  for (size_t i = 0; i < fwhm_branches.size(); i++)
-  {
-    auto &branch_name = fwhm_branches[i];
-    tree->Draw(Form("%s>>h_%s", branch_name.Data(), branch_name.Data()), "", "");
-    TH1F *h = (TH1F *)gDirectory->Get(Form("h_%s", branch_name.Data()));
-    if (h)
+    cout << "  Found " << event_indices.size() << " events for label " << label_id << endl;
+
+    // Create an entry list for this label
+    TString entrylist_name = Form("entrylist_label%d", label_id);
+    TEntryList *elist = new TEntryList(entrylist_name, entrylist_name);
+    for (auto idx : event_indices)
     {
-      h->SetTitle(Form("%s Distribution;%s;Counts", branch_name.Data(), branch_name.Data()));
-      h->SetLineColor(kGreen + 2);
-      h->SetLineWidth(2);
-      h->Draw();
-      c->Update();
+      elist->Enter(idx);
+    }
+    tree->SetEntryList(elist);
 
-      // Close PDF on the last page
-      if (i == fwhm_branches.size() - 1)
+    // Plot amplitude branches for this label
+    for (auto &branch_name : amplitude_branches)
+    {
+      tree->Draw(Form("%s>>h_%s_label%d(100,0,2500)", branch_name.Data(), branch_name.Data(), label_id), "", "");
+      TH1F *h = (TH1F *)gDirectory->Get(Form("h_%s_label%d", branch_name.Data(), label_id));
+      if (h && h->GetEntries() > 0)
       {
-        c->Print(Form("%s)", pdf_name.Data()));
-      }
-      else
-      {
+        h->SetTitle(Form("Label %d: %s Distribution;%s;Counts", label_id, branch_name.Data(), branch_name.Data()));
+        h->SetLineColor(kBlue);
+        h->SetLineWidth(2);
+        h->Draw();
+        c->Update();
+
         if (page_count == 0)
-        {
           c->Print(Form("%s(", pdf_name.Data()));
-        }
         else
-        {
           c->Print(pdf_name.Data());
-        }
+        page_count++;
+        delete h;
       }
-      page_count++;
     }
+
+    // Plot mean branches for this label
+    for (auto &branch_name : mean_branches)
+    {
+      tree->Draw(Form("%s>>h_%s_label%d(100,0,40)", branch_name.Data(), branch_name.Data(), label_id), "", "");
+      TH1F *h = (TH1F *)gDirectory->Get(Form("h_%s_label%d", branch_name.Data(), label_id));
+      if (h && h->GetEntries() > 0)
+      {
+        h->SetTitle(Form("Label %d: %s Distribution;%s;Counts", label_id, branch_name.Data(), branch_name.Data()));
+        h->SetLineColor(kRed);
+        h->SetLineWidth(2);
+        h->Draw();
+        c->Update();
+
+        c->Print(pdf_name.Data());
+        page_count++;
+        delete h;
+      }
+    }
+
+    // Plot sigma branches for this label
+    for (auto &branch_name : sigma_branches)
+    {
+      tree->Draw(Form("%s>>h_%s_label%d(100,0,6)", branch_name.Data(), branch_name.Data(), label_id), "", "");
+      TH1F *h = (TH1F *)gDirectory->Get(Form("h_%s_label%d", branch_name.Data(), label_id));
+      if (h && h->GetEntries() > 0)
+      {
+        h->SetTitle(Form("Label %d: %s Distribution;%s;Counts", label_id, branch_name.Data(), branch_name.Data()));
+        h->SetLineColor(kGreen + 2);
+        h->SetLineWidth(2);
+        h->Draw();
+        c->Update();
+
+        c->Print(pdf_name.Data());
+        page_count++;
+        delete h;
+      }
+    }
+
+    delete elist;
+    tree->SetEntryList(nullptr);
   }
 
-  cout << "Created " << page_count << " pages in " << pdf_name << endl;
+  // Close the PDF
+  if (page_count > 0)
+  {
+    c->Print(Form("%s]", pdf_name.Data()));
+    cout << "Created " << page_count << " pages in " << pdf_name << endl;
+  }
+  else
+  {
+    cout << "No distributions were created" << endl;
+  }
 
+  delete c;
   f->Close();
 }

@@ -3,7 +3,7 @@ void DrawWaveform()
   gErrorIgnoreLevel = kError;
   Int_t runnumber = 242;
   const Int_t method[2] = {2, 0}; // Cluster with method[0], recluster with method[1]
-  const Int_t start_type = 1;     // 0: Do not recluster; 1: Recluster with method[1]
+  const Int_t start_type = 0;     // 0: Do not recluster; 1: Recluster with method[1]
 
   const UInt_t mode = 10;
   const UInt_t slot = 3;
@@ -11,7 +11,7 @@ void DrawWaveform()
   const UInt_t ns0 = 40;
   const UInt_t ns1 = 120;
   const UInt_t ng = 50;
-  const UInt_t threshold = 600;
+  const UInt_t threshold = 50;
 
   TGraph *g_sample[8];
   for (Int_t ig = 0; ig < 8; ig++)
@@ -60,10 +60,53 @@ void DrawWaveform()
   t_store->SetBranchAddress("channel", &store_channel);
   t_store->SetBranchAddress("sample", store_sample);
 
+  // Open training file to read Gaussian fit parameters
+  auto f_train = new TFile("data/training-0.root");
+  TTree *t_train = nullptr;
+  const Int_t np = 3;
+  Int_t train_event;
+  Float_t plot_mean[8][np], plot_sigma[8][np], plot_amplitude[8][np];
+  map<Int_t, vector<vector<Float_t>>> event_plot_mean, event_plot_sigma, event_plot_amplitude;
+
+  if (f_train && !f_train->IsZombie())
+  {
+    t_train = (TTree *)f_train->Get("T");
+    if (t_train)
+    {
+      t_train->SetBranchAddress("event", &train_event);
+      for (Int_t ich = 0; ich < 8; ich++)
+        for (Int_t ip = 0; ip < np; ip++)
+        {
+          t_train->SetBranchAddress(Form("plot_mean_ch%d_p%d", ich, ip), &plot_mean[ich][ip]);
+          t_train->SetBranchAddress(Form("plot_sigma_ch%d_p%d", ich, ip), &plot_sigma[ich][ip]);
+          t_train->SetBranchAddress(Form("plot_amplitude_ch%d_p%d", ich, ip), &plot_amplitude[ich][ip]);
+        }
+
+      // Read all Gaussian parameters into maps indexed by event
+      for (Long64_t i = 0; i < t_train->GetEntries(); i++)
+      {
+        t_train->GetEntry(i);
+        vector<vector<Float_t>> mean_vec(8, vector<Float_t>(np));
+        vector<vector<Float_t>> sigma_vec(8, vector<Float_t>(np));
+        vector<vector<Float_t>> amp_vec(8, vector<Float_t>(np));
+        for (Int_t ich = 0; ich < 8; ich++)
+          for (Int_t ip = 0; ip < np; ip++)
+          {
+            mean_vec[ich][ip] = plot_mean[ich][ip];
+            sigma_vec[ich][ip] = plot_sigma[ich][ip];
+            amp_vec[ich][ip] = plot_amplitude[ich][ip];
+          }
+        event_plot_mean[train_event] = mean_vec;
+        event_plot_sigma[train_event] = sigma_vec;
+        event_plot_amplitude[train_event] = amp_vec;
+      }
+    }
+  }
+
   UInt_t last_event = 0;
   UInt_t total_channel = 0;
   UInt_t fadc_channel = 0;
-  vector<UInt_t> v_channel;
+  set<UInt_t> processed_channels;
   UInt_t max_index[8] = {};
   UInt_t max_sample[8] = {};
   UInt_t max_sample_1 = 0;
@@ -71,6 +114,7 @@ void DrawWaveform()
   UInt_t event_1or2 = 0;
   UInt_t event_1and2 = 0;
   Float_t sum_sample[8] = {};
+  Float_t ped[8] = {};
   bool trig[2] = {};
 
   cout << "Plotting waveform for run " << runnumber << ", classified by method " << method[0] << " and " << method[1] << endl;
@@ -87,18 +131,6 @@ void DrawWaveform()
 
       if (trig[0] && trig[1])
       {
-        for (ULong64_t jen = ien + 1 - total_channel; jen < ien + 1; jen++)
-        {
-          t_store->GetEntry(jen);
-          // cout << store_event << ", " << store_channel << ", " << store_sample[0] << endl;
-          if (store_channel < 8)
-          {
-            v_channel.push_back(store_channel);
-            for (UInt_t sample_num = 0; sample_num < ng; sample_num++)
-              g_sample[store_channel]->SetPoint((Int_t)sample_num, sample_num * 4, store_sample[sample_num]);
-          } // PMT channels
-        } // jen
-
         if (event_label.find(store_event) == event_label.end())
           continue;
         Int_t label = event_label[store_event];
@@ -106,18 +138,48 @@ void DrawWaveform()
         auto ctmp = new TCanvas(Form("c_label%d_event%u", label, store_event), Form("c_label%d_event%u", label, store_event), 600, 600);
         ctmp->cd();
         auto leg0 = new TLegend(0.1, 0.65, 0.25, 0.9);
-        for (UInt_t ich = 0; ich < v_channel.size(); ich++)
+        vector<TF1 *> plot_functions; // Store Gaussian functions for cleanup
+
+        bool first = true;
+        for (const auto &chan : processed_channels)
         {
-          UInt_t chan = v_channel.at(ich);
           g_sample[chan]->SetTitle(Form("Label %d, Size %lu, Event %u", label, label_event.count(label), store_event));
           g_sample[chan]->GetXaxis()->SetTitle("Time (ns)");
           g_sample[chan]->GetYaxis()->SetRangeUser(0, 1600);
           g_sample[chan]->SetLineColor(chan + 1);
           g_sample[chan]->SetLineStyle(1);
           g_sample[chan]->SetLineWidth(3);
-          g_sample[chan]->Draw(ich == 0 ? "AL" : "L");
+          g_sample[chan]->Draw(first ? "AL" : "L");
           leg0->AddEntry(g_sample[chan], Form("CH%u", chan), "L");
+          first = false;
         }
+
+        // Draw Gaussian fits if available for this event
+        if (event_plot_mean.find(store_event) != event_plot_mean.end())
+        {
+          auto &mean_vec = event_plot_mean[store_event];
+          auto &sigma_vec = event_plot_sigma[store_event];
+          auto &amp_vec = event_plot_amplitude[store_event];
+
+          for (const auto &chan : processed_channels)
+          {
+            for (Int_t ip = 0; ip < np; ip++)
+            {
+              if (mean_vec[chan][ip] > 0 && sigma_vec[chan][ip] > 0 && amp_vec[chan][ip] > 0)
+              {
+                TF1 *plot_fit = new TF1(Form("plot_evt%u_ch%u_p%d", store_event, chan, ip),
+                                        "gaus(0)+pol0(3)", 0, ng * 4);
+                plot_fit->SetParameters(amp_vec[chan][ip], mean_vec[chan][ip] * 4, sigma_vec[chan][ip] * 4, ped[chan]);
+                plot_fit->SetLineColor(chan + 1);
+                plot_fit->SetLineStyle(2); // Dashed line for Gaussian
+                plot_fit->SetLineWidth(2);
+                plot_fit->Draw("SAME");
+                plot_functions.push_back(plot_fit);
+              }
+            }
+          }
+        }
+
         leg0->Draw();
 
         // cout << "Event " << store_event << ", Label " << label << endl;
@@ -127,9 +189,14 @@ void DrawWaveform()
           ctmp->Print(wavefile + Form("-label%d.pdf", label));
         label_count[label]++;
         ctmp->Close();
+
+        // Clean up Gaussian functions
+        for (auto fn : plot_functions)
+          delete fn;
+        plot_functions.clear();
+
         delete ctmp;
         delete leg0;
-        v_channel.clear();
 
         for (Int_t ic = 0; ic < 8; ic++)
           h_spectrum[ic]->Fill(sum_sample[ic]);
@@ -153,6 +220,7 @@ void DrawWaveform()
 
       total_channel = -1;
       fadc_channel = 0;
+      processed_channels.clear();
       for (Int_t ic = 0; ic < 8; ic++)
       {
         max_index[ic] = 0;
@@ -165,39 +233,43 @@ void DrawWaveform()
         trig[it] = 0;
     } // new event
 
-    else if (store_channel < 8)
+    else if (store_channel < 8 && processed_channels.find(store_channel) == processed_channels.end())
     {
-      for (Int_t is = 0; is < NUMSAMPLE; is++)
-      {
-        if (store_sample[is] > max_sample[store_channel])
-        {
-          max_index[store_channel] = is;
-          max_sample[store_channel] = store_sample[is];
-        }
-        if (is >= ns0 / 4 && is < ns1 / 4)
-          sum_sample[store_channel] += store_sample[is];
-      }
-      for (Int_t is = 40 / 4; is < 120 / 4; is++)
-        if (store_sample[is] > max_sample_1)
-          max_sample_1 = store_sample[is];
-      for (Int_t is = 120 / 4; is < 200 / 4; is++)
-        if (store_sample[is] > max_sample_2)
-          max_sample_2 = store_sample[is];
+      processed_channels.insert(store_channel);
+
+      for (UInt_t sample_num = 0; sample_num < ng; sample_num++)
+        g_sample[store_channel]->SetPoint((Int_t)sample_num, sample_num * 4, store_sample[sample_num]);
 
       const Int_t nped = 4;
-      Float_t ped = 0.;
+      ped[store_channel] = 0.;
       for (Int_t is = 0; is < nped; is++)
-        ped += store_sample[is];
-      max_sample[store_channel] -= (Float_t)ped / nped;
-      sum_sample[store_channel] /= (Float_t)(ns1 - ns0) / 4;
-      sum_sample[store_channel] -= (Float_t)ped / nped;
-      sum_sample[store_channel] *= (Float_t)(ns1 - ns0) / 4 / NUMSAMPLE;
+        ped[store_channel] += store_sample[is];
+      ped[store_channel] /= (Float_t)nped;
+
+      for (Int_t is = 0; is < NUMSAMPLE; is++)
+      {
+        if (store_sample[is] - ped[store_channel] > max_sample[store_channel])
+        {
+          max_index[store_channel] = is;
+          max_sample[store_channel] = store_sample[is] - ped[store_channel];
+        }
+        if (is >= ns0 / 4 && is < ns1 / 4)
+          sum_sample[store_channel] += store_sample[is] - ped[store_channel];
+      }
+      sum_sample[store_channel] /= (Float_t)NUMSAMPLE;
 
       if (max_sample[store_channel] > threshold)
       {
         fadc_channel++;
         trig[store_channel / 4] = true;
       }
+
+      for (Int_t is = 40 / 4; is < 120 / 4; is++)
+        if (store_sample[is] - ped[store_channel] > max_sample_1)
+          max_sample_1 = store_sample[is] - ped[store_channel];
+      for (Int_t is = 120 / 4; is < 200 / 4; is++)
+        if (store_sample[is] - ped[store_channel] > max_sample_2)
+          max_sample_2 = store_sample[is] - ped[store_channel];
     } // PMT channels
 
     total_channel++;
