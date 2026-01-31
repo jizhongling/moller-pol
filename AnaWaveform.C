@@ -8,12 +8,13 @@ void AnaWaveform(const Int_t proc = 0)
   const UInt_t slot = 3;
   const UInt_t NUMSAMPLE = 240 / 4;
   const UInt_t threshold = 50;
-  const UInt_t peak_cut = 150;
+  const UInt_t peak_cut = 300;
 
   const Int_t np = 3;
   Int_t ntp_event, ntp_sample[4][NUMSAMPLE], ntp_time[4][np], ntp_peak[4][np], ntp_fwhm[4][np], ntp_area[4][np], ntp_diff[6][np];
   Float_t ntp_gaus_mean[4][np], ntp_gaus_sigma[4][np], ntp_gaus_amplitude[4][np], ntp_gaus_diff[6][np];
   Float_t ntp_plot_mean[8][np], ntp_plot_sigma[8][np], ntp_plot_amplitude[8][np];
+  Float_t ntp_area_sum;
   auto f_out = new TFile(Form("data/training-%d.root", proc), "RECREATE");
   auto t_out = new TTree("T", "Waveform data");
   t_out->Branch("event", &ntp_event, "event/I");
@@ -44,6 +45,7 @@ void AnaWaveform(const Int_t proc = 0)
       t_out->Branch(Form("diff_ch%d_p%d", ich, ip), &ntp_diff[ich][ip], Form("diff_ch%d_p%d/I", ich, ip));
       t_out->Branch(Form("gaus_diff_ch%d_p%d", ich, ip), &ntp_gaus_diff[ich][ip], Form("gaus_diff_ch%d_p%d/F", ich, ip));
     }
+  t_out->Branch("area_sum", &ntp_area_sum, "area_sum/F");
 
   auto f = new TFile(Form("Rootfiles/fadc_data_%d.root", runnumber));
   TDirectory *dir = (TDirectory *)f->Get(Form("/mode_%u_data/slot_%u", mode, slot));
@@ -96,16 +98,16 @@ void AnaWaveform(const Int_t proc = 0)
       ntp_diff[ic][ip] = 0;
       ntp_gaus_diff[ic][ip] = 0;
     }
+  ntp_area_sum = 0;
 
   for (ULong64_t ien = 0; ien < t_store->GetEntries(); ien++)
   {
     t_store->GetEntry(ien);
+    if (ien == 0)
+      last_event = store_event;
 
     if (store_event != last_event)
     {
-      last_event = store_event;
-      ien--;
-
       if (trig[0] && trig[1])
       {
         for (const auto &chan : processed_channels)
@@ -159,7 +161,7 @@ void AnaWaveform(const Int_t proc = 0)
                    return va.at(i1) > va.at(i2);
                  });
 
-            ntp_event = store_event;
+            ntp_event = last_event;
             for (Int_t is = 0; is < NUMSAMPLE; is++)
               ntp_sample[ntp_chan][is] = sample[chan].at(is);
 
@@ -171,18 +173,19 @@ void AnaWaveform(const Int_t proc = 0)
               ntp_peak[ntp_chan][ip] = max(peak[chan].at(ip_sorted), 0);
               ntp_fwhm[ntp_chan][ip] = max(fwhm[chan].at(ip_sorted), 0);
               ntp_area[ntp_chan][ip] = max(area[chan].at(ip_sorted), 0);
+              ntp_area_sum += ntp_area[ntp_chan][ip];
 
               // Gaussian fit around peak
               Int_t peak_time = time[chan].at(ip_sorted);
               if (peak_time > 0 && peak_time < NUMSAMPLE)
               {
                 // Define fit range around peak (e.g., +/- 10 samples or based on FWHM)
-                Int_t fit_range = max(10, abs(fwhm[chan].at(ip_sorted)) * 2);
+                Int_t fit_range = min(10, fwhm[chan].at(ip_sorted) * 2);
                 Int_t fit_start = max(0, peak_time - fit_range);
                 Int_t fit_end = min((Int_t)NUMSAMPLE - 1, peak_time + fit_range);
 
                 // Create a temporary histogram for fitting
-                TH1D *h_peak = new TH1D(Form("h_peak_evt%d_ch%d_p%zu", store_event, ntp_chan, ip),
+                TH1D *h_peak = new TH1D(Form("h_peak_evt%d_ch%d_p%zu", last_event, ntp_chan, ip),
                                         "Peak", fit_end - fit_start + 1, fit_start - 0.5, fit_end + 0.5);
                 for (Int_t is = fit_start; is <= fit_end; is++)
                 {
@@ -190,9 +193,9 @@ void AnaWaveform(const Int_t proc = 0)
                 }
 
                 // Create and fit Gaussian
-                TF1 *gaus_fit = new TF1(Form("gaus_evt%d_ch%d_p%zu", store_event, ntp_chan, ip),
+                TF1 *gaus_fit = new TF1(Form("gaus_evt%d_ch%d_p%zu", last_event, ntp_chan, ip),
                                         "gaus", fit_start, fit_end);
-                gaus_fit->SetParameters(peak[chan].at(ip_sorted), peak_time, 2.0);
+                gaus_fit->SetParameters(peak[chan].at(ip_sorted), peak_time, fwhm[chan].at(ip_sorted));
                 h_peak->Fit(gaus_fit, "QN"); // Q = quiet, N = no draw
 
                 ntp_gaus_amplitude[ntp_chan][ip] = ntp_plot_amplitude[chan][ip] = gaus_fit->GetParameter(0);
@@ -299,71 +302,104 @@ void AnaWaveform(const Int_t proc = 0)
           ntp_diff[ic][ip] = 0;
           ntp_gaus_diff[ic][ip] = 0;
         }
+      ntp_area_sum = 0;
       for (Int_t it = 0; it < 2; it++)
         trig[it] = 0;
+
+      last_event = store_event;
     } // new event
 
-    else if (store_channel < 8 && processed_channels.find(store_channel) == processed_channels.end())
+    if (store_channel < 8 && processed_channels.find(store_channel) == processed_channels.end())
     {
       processed_channels.insert(store_channel);
 
       const Int_t nped = 4;
-      Float_t ped = 0.;
+      Float_t lped = 0., rped = 0.;
       for (Int_t is = 0; is < nped; is++)
-        ped += store_sample[is];
-      ped /= (Float_t)nped;
+        lped += store_sample[is];
+      for (Int_t is = NUMSAMPLE - nped; is < NUMSAMPLE; is++)
+        rped += store_sample[is];
+      Float_t ped = min(lped, rped) / (Float_t)nped;
 
       for (Int_t is = 0; is < NUMSAMPLE; is++)
       {
         sample[store_channel].push_back(store_sample[is] - ped);
-        // detect local maxima (simple 1-sample neighbor check)
-        if (is > 0 && is < (Int_t)NUMSAMPLE - 1)
-        {
-          if (store_sample[is] - ped > peak_cut &&
-              store_sample[is] > store_sample[is - 1] &&
-              store_sample[is] > store_sample[is + 1])
-          {
-            time[store_channel].push_back(is);
-            peak[store_channel].push_back(store_sample[is] - ped);
-            Int_t ld = 0, rd = 0;
-            Float_t sum_area = 0.;
-            for (Int_t id = 0; id < NUMSAMPLE; id++)
-              if (is - id >= 0 && is - id < (Int_t)NUMSAMPLE)
-              {
-                if (store_sample[is - id] - ped > (store_sample[is] - ped) / 2)
-                  ld++;
-                else
-                  break;
-              }
-            for (Int_t id = 0; id < NUMSAMPLE; id++)
-              if (is + id >= 0 && is + id < (Int_t)NUMSAMPLE)
-              {
-                if (store_sample[is + id] - ped > (store_sample[is] - ped) / 2)
-                  rd++;
-                else
-                  break;
-              }
-            fwhm[store_channel].push_back(rd - ld);
-            for (Int_t id = -2 * ld; id <= 2 * rd; id++)
-              if (is + id >= 0 && is + id < (Int_t)NUMSAMPLE)
-                sum_area += store_sample[is + id] - ped;
-            area[store_channel].push_back(sum_area);
-          }
-        }
-
         if (store_sample[is] - ped > max_sample[store_channel])
         {
           max_index[store_channel] = is;
-          max_sample[store_channel] = store_sample[is];
+          max_sample[store_channel] = store_sample[is] - ped;
         }
         sum_sample[store_channel] += store_sample[is] - ped;
-      } // is
+      }
 
       if (max_sample[store_channel] > peak_cut)
       {
         fadc_channel++;
         trig[store_channel / 4] = true;
       }
+
+      // detect local maxima (handles flat-top peaks)
+      for (Int_t is = 1; is < (Int_t)NUMSAMPLE - 1; is++)
+      {
+        if (store_sample[is] - ped > peak_cut)
+        {
+          // Check if we're at a local maximum (including flat tops)
+          // Find the extent of any plateau at this level
+          Int_t plateau_start = is;
+          Int_t plateau_end = is;
+
+          // Extend plateau backwards while values are equal
+          while (plateau_start > 0 && store_sample[plateau_start - 1] == store_sample[is])
+            plateau_start--;
+
+          // Extend plateau forwards while values are equal
+          while (plateau_end < (Int_t)NUMSAMPLE - 1 && store_sample[plateau_end + 1] == store_sample[is])
+            plateau_end++;
+
+          // Check if this plateau is a local maximum
+          bool is_peak = true;
+          if (plateau_start > 0 && store_sample[plateau_start - 1] >= store_sample[is])
+            is_peak = false;
+          if (plateau_end < (Int_t)NUMSAMPLE - 1 && store_sample[plateau_end + 1] >= store_sample[is])
+            is_peak = false;
+
+          if (is_peak && is == plateau_start) // Only process once per plateau
+          {
+            // Use the center of the plateau as peak position
+            Int_t peak_pos = (plateau_start + plateau_end) / 2;
+
+            time[store_channel].push_back(peak_pos);
+            peak[store_channel].push_back(store_sample[is] - ped);
+
+            Int_t ld = 0, rd = 0;
+            Float_t sum_area = 0.;
+            for (Int_t id = 0; id < NUMSAMPLE; id++)
+              if (peak_pos - id >= 0 && peak_pos - id < (Int_t)NUMSAMPLE)
+              {
+                if (store_sample[peak_pos - id] - ped > (store_sample[is] - ped) / 2)
+                  ld++;
+                else
+                  break;
+              }
+            for (Int_t id = 0; id < NUMSAMPLE; id++)
+              if (peak_pos + id >= 0 && peak_pos + id < (Int_t)NUMSAMPLE)
+              {
+                if (store_sample[peak_pos + id] - ped > (store_sample[is] - ped) / 2)
+                  rd++;
+                else
+                  break;
+              }
+            fwhm[store_channel].push_back(rd + ld);
+            for (Int_t id = -2 * ld; id <= 2 * rd; id++)
+              if (peak_pos + id >= 0 && peak_pos + id < (Int_t)NUMSAMPLE)
+                sum_area += store_sample[peak_pos + id] - ped;
+            area[store_channel].push_back(sum_area);
+          }
+
+          // Skip to end of plateau to avoid reprocessing
+          is = plateau_end;
+        }
+      } // is
     } // PMT channels
 
     total_channel++;

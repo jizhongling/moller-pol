@@ -10,8 +10,9 @@ void DrawWaveform()
   const UInt_t NUMSAMPLE = 240 / 4;
   const UInt_t ns0 = 40;
   const UInt_t ns1 = 120;
-  const UInt_t ng = 50;
+  const UInt_t ng = 60;
   const UInt_t threshold = 50;
+  const UInt_t peak_cut = 300;
 
   TGraph *g_sample[8];
   for (Int_t ig = 0; ig < 8; ig++)
@@ -123,19 +124,18 @@ void DrawWaveform()
   for (ULong64_t ien = 0; ien < t_store->GetEntries(); ien++)
   {
     t_store->GetEntry(ien);
+    if (ien == 0)
+      last_event = store_event;
 
     if (store_event != last_event)
     {
-      last_event = store_event;
-      ien--;
-
       if (trig[0] && trig[1])
       {
-        if (event_label.find(store_event) == event_label.end())
+        if (event_label.find(last_event) == event_label.end())
           continue;
-        Int_t label = event_label[store_event];
+        Int_t label = event_label[last_event];
 
-        auto ctmp = new TCanvas(Form("c_label%d_event%u", label, store_event), Form("c_label%d_event%u", label, store_event), 600, 600);
+        auto ctmp = new TCanvas(Form("c_label%d_event%u", label, last_event), Form("c_label%d_event%u", label, last_event), 600, 600);
         ctmp->cd();
         auto leg0 = new TLegend(0.1, 0.65, 0.25, 0.9);
         vector<TF1 *> plot_functions; // Store Gaussian functions for cleanup
@@ -143,7 +143,7 @@ void DrawWaveform()
         bool first = true;
         for (const auto &chan : processed_channels)
         {
-          g_sample[chan]->SetTitle(Form("Label %d, Size %lu, Event %u", label, label_event.count(label), store_event));
+          g_sample[chan]->SetTitle(Form("Label %d, Size %lu, Event %u", label, label_event.count(label), last_event));
           g_sample[chan]->GetXaxis()->SetTitle("Time (ns)");
           g_sample[chan]->GetYaxis()->SetRangeUser(0, 1600);
           g_sample[chan]->SetLineColor(chan + 1);
@@ -155,21 +155,24 @@ void DrawWaveform()
         }
 
         // Draw Gaussian fits if available for this event
-        if (event_plot_mean.find(store_event) != event_plot_mean.end())
+        if (event_plot_mean.find(last_event) != event_plot_mean.end())
         {
-          auto &mean_vec = event_plot_mean[store_event];
-          auto &sigma_vec = event_plot_sigma[store_event];
-          auto &amp_vec = event_plot_amplitude[store_event];
-
+          auto &mean_vec = event_plot_mean[last_event];
+          auto &sigma_vec = event_plot_sigma[last_event];
+          auto &amp_vec = event_plot_amplitude[last_event];
           for (const auto &chan : processed_channels)
           {
             for (Int_t ip = 0; ip < np; ip++)
             {
               if (mean_vec[chan][ip] > 0 && sigma_vec[chan][ip] > 0 && amp_vec[chan][ip] > 0)
               {
-                TF1 *plot_fit = new TF1(Form("plot_evt%u_ch%u_p%d", store_event, chan, ip),
-                                        "gaus(0)+pol0(3)", 0, ng * 4);
-                plot_fit->SetParameters(amp_vec[chan][ip], mean_vec[chan][ip] * 4, sigma_vec[chan][ip] * 4, ped[chan]);
+                Float_t mean_ns = mean_vec[chan][ip] * 4;
+                Float_t sigma_ns = sigma_vec[chan][ip] * 4;
+                Float_t xmin = mean_ns - 3 * sigma_ns;
+                Float_t xmax = mean_ns + 3 * sigma_ns;
+                TF1 *plot_fit = new TF1(Form("plot_evt%u_ch%u_p%d", last_event, chan, ip),
+                                        "gaus(0)+pol0(3)", xmin, xmax);
+                plot_fit->SetParameters(amp_vec[chan][ip], mean_ns, sigma_ns, ped[chan]);
                 plot_fit->SetLineColor(chan + 1);
                 plot_fit->SetLineStyle(2); // Dashed line for Gaussian
                 plot_fit->SetLineWidth(2);
@@ -182,7 +185,7 @@ void DrawWaveform()
 
         leg0->Draw();
 
-        // cout << "Event " << store_event << ", Label " << label << endl;
+        // cout << "Event " << last_event << ", Label " << label << endl;
         if (label_count[label] == 1)
           ctmp->Print(wavefile + Form("-label%d.pdf(", label));
         else
@@ -231,20 +234,24 @@ void DrawWaveform()
       }
       for (Int_t it = 0; it < 2; it++)
         trig[it] = 0;
+
+      last_event = store_event;
     } // new event
 
-    else if (store_channel < 8 && processed_channels.find(store_channel) == processed_channels.end())
+    if (store_channel < 8 && processed_channels.find(store_channel) == processed_channels.end())
     {
       processed_channels.insert(store_channel);
 
+      const Int_t nped = 4;
+      Float_t lped = 0., rped = 0.;
+      for (Int_t is = 0; is < nped; is++)
+        lped += store_sample[is];
+      for (Int_t is = NUMSAMPLE - nped; is < NUMSAMPLE; is++)
+        rped += store_sample[is];
+      ped[store_channel] = min(lped, rped) / (Float_t)nped;
+
       for (UInt_t sample_num = 0; sample_num < ng; sample_num++)
         g_sample[store_channel]->SetPoint((Int_t)sample_num, sample_num * 4, store_sample[sample_num]);
-
-      const Int_t nped = 4;
-      ped[store_channel] = 0.;
-      for (Int_t is = 0; is < nped; is++)
-        ped[store_channel] += store_sample[is];
-      ped[store_channel] /= (Float_t)nped;
 
       for (Int_t is = 0; is < NUMSAMPLE; is++)
       {
@@ -256,9 +263,9 @@ void DrawWaveform()
         if (is >= ns0 / 4 && is < ns1 / 4)
           sum_sample[store_channel] += store_sample[is] - ped[store_channel];
       }
-      sum_sample[store_channel] /= (Float_t)NUMSAMPLE;
+      sum_sample[store_channel] /= (Float_t)(ns1 - ns0) / 4.0;
 
-      if (max_sample[store_channel] > threshold)
+      if (max_sample[store_channel] > peak_cut)
       {
         fadc_channel++;
         trig[store_channel / 4] = true;

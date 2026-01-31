@@ -56,7 +56,8 @@ void DrawDistributions()
 
   // Build branch name lists for Gaussian parameters
   const Int_t chlist[4] = {0, 1, 4, 5};
-  vector<TString> amplitude_branches, mean_branches, sigma_branches;
+  vector<TString> area_branches, amplitude_branches, mean_branches, sigma_branches;
+  area_branches.push_back("area_sum");
   for (Int_t ich = 0; ich < 4; ich++)
   {
     for (Int_t ip = 0; ip < 2; ip++)
@@ -67,12 +68,13 @@ void DrawDistributions()
     }
   }
 
-  cout << "Will plot " << amplitude_branches.size() << " amplitude, mean, and sigma distributions per label" << endl;
+  cout << "Will plot " << amplitude_branches.size() << " amplitude, mean, and sigma distributions per label and area sum" << endl;
 
   TString pdf_name = Form("plots/Distributions-run%d-method%d-method%d.pdf", runnumber, method[0], method[1]);
   auto c = new TCanvas("c", "Distributions", 600, 600);
   c->SetGrid();
   c->SetLogy();
+  c->Print(Form("%s[", pdf_name.Data()));
 
   Int_t page_count = 0;
 
@@ -109,6 +111,25 @@ void DrawDistributions()
     }
     tree->SetEntryList(elist);
 
+    // Plot area branches for this label
+    for (auto &branch_name : area_branches)
+    {
+      tree->Draw(Form("%s>>h_%s_label%d(300,0,15000)", branch_name.Data(), branch_name.Data(), label_id), "", "");
+      TH1F *h = (TH1F *)gDirectory->Get(Form("h_%s_label%d", branch_name.Data(), label_id));
+      if (h && h->GetEntries() > 0)
+      {
+        h->SetTitle(Form("Label %d: %s Distribution;%s;Counts", label_id, branch_name.Data(), branch_name.Data()));
+        h->SetLineColor(kBlack);
+        h->SetLineWidth(2);
+        h->Draw();
+        c->Update();
+
+        c->Print(pdf_name.Data());
+        page_count++;
+        delete h;
+      }
+    }
+
     // Plot amplitude branches for this label
     for (auto &branch_name : amplitude_branches)
     {
@@ -122,10 +143,7 @@ void DrawDistributions()
         h->Draw();
         c->Update();
 
-        if (page_count == 0)
-          c->Print(Form("%s(", pdf_name.Data()));
-        else
-          c->Print(pdf_name.Data());
+        c->Print(pdf_name.Data());
         page_count++;
         delete h;
       }

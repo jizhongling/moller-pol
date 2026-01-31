@@ -35,7 +35,7 @@ root -l -b -q 'AnaWaveform.C(0)'
 
 ### 2) Cluster (type 0, normalize + PCA + HDBSCAN)
 ```shell
-python main.py --type 0 --method 2 --eps 4.0 --norm --umap
+python main.py --type 0 --method 2 --eps 1.0 --norm --umap
 ```
 
 ### 3) Optional: recluster a label (type 1, label N, KMeans)
