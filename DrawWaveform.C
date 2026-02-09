@@ -66,6 +66,8 @@ void DrawWaveform()
   TTree *t_train = nullptr;
   const Int_t np = 3;
   Int_t train_event;
+  Float_t ntp_area_sum;
+  map<Int_t, Float_t> event_area_sum;
   Float_t plot_mean[8][np], plot_sigma[8][np], plot_amplitude[8][np];
   map<Int_t, vector<vector<Float_t>>> event_plot_mean, event_plot_sigma, event_plot_amplitude;
 
@@ -75,6 +77,7 @@ void DrawWaveform()
     if (t_train)
     {
       t_train->SetBranchAddress("event", &train_event);
+      t_train->SetBranchAddress("area_sum", &ntp_area_sum);
       for (Int_t ich = 0; ich < 8; ich++)
         for (Int_t ip = 0; ip < np; ip++)
         {
@@ -97,6 +100,7 @@ void DrawWaveform()
             sigma_vec[ich][ip] = plot_sigma[ich][ip];
             amp_vec[ich][ip] = plot_amplitude[ich][ip];
           }
+        event_area_sum[train_event] = ntp_area_sum;
         event_plot_mean[train_event] = mean_vec;
         event_plot_sigma[train_event] = sigma_vec;
         event_plot_amplitude[train_event] = amp_vec;
@@ -151,6 +155,15 @@ void DrawWaveform()
           g_sample[chan]->SetLineWidth(3);
           g_sample[chan]->Draw(first ? "AL" : "L");
           leg0->AddEntry(g_sample[chan], Form("CH%u", chan), "L");
+          if (first && event_area_sum.find(last_event) != event_area_sum.end())
+          {
+            auto &area_sum = event_area_sum[last_event];
+            TLatex *latex = new TLatex();
+            latex->SetNDC();
+            latex->SetTextAlign(31); // right-aligned
+            latex->SetTextSize(0.035);
+            latex->DrawLatex(0.9, 0.85, Form("Area = %.2E", area_sum));
+          }
           first = false;
         }
 
