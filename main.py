@@ -10,6 +10,10 @@ from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.cluster import DBSCAN
 from sklearn.cluster import HDBSCAN
+from sklearn.tree import DecisionTreeClassifier, export_graphviz
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, HistGradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 import umap
 import torch
 import torch.nn as nn
@@ -22,7 +26,25 @@ class DataWF():
         # Determine which branches to load based on whether using autoencoder/VAE
         use_waveforms = args.autoencoder or args.vae or args.load_autoencoder or args.load_vae
         
-        if use_waveforms:
+        if args.type == 2:
+            print("\nLoading production mode data for classification\n")
+            branch = ["event"]
+            branch += [f"pinteg_ch{ich}_p{ip}" for ich in range(4) for ip in range(2)]
+            branch += [f"pdiff_ch{ich}_p{ip}" for ich in range(6) for ip in range(2)]
+            root_tree = ur.concatenate(files, branch, library='pd')
+
+            # Read labels file
+            labels_df = pd.read_csv("data/labels-type0-method2.txt", sep=' ', header=None, names=['event', 'label'])
+            
+            # Merge root_tree with labels to select each event which has a label
+            merged_df = root_tree.merge(labels_df, on='event', how='inner')
+            merged_df = merged_df[merged_df['label'].notna()]
+            
+            # Set branch info without event as input, event as index, and label as target
+            self.input = merged_df.drop(['event', 'label'], axis=1)
+            self.index = merged_df['event']
+            self.target = merged_df['label']
+        elif use_waveforms:
             # Load waveform sample data for autoencoder/VAE
             print("\nLoading waveform sample data for autoencoder/VAE\n")
             sample_branches = [f"sample_ch{ich}" for ich in range(4)]
@@ -215,6 +237,24 @@ class Cluster():
         elif args.method == 2:
             print("\nUsing HDBSCAN\n")
             self.model = HDBSCAN(min_cluster_size=2*args.dim, min_samples=5, cluster_selection_epsilon=args.eps, n_jobs=-1, copy=False)
+        else:
+            sys.exit("\nError: Wrong method number\n")
+
+
+class Tree():
+    def __init__(self, args):
+        if args.method == 0:
+            print("\nUsing decision tree\n")
+            self.estimator = DecisionTreeClassifier(max_depth=None, class_weight='balanced')
+        elif args.method == 1:
+            print("\nUsing random forest\n")
+            self.estimator = RandomForestClassifier(n_estimators=args.ntree, random_state=args.seed, class_weight='balanced')
+        elif args.method == 2:
+            print("\nUsing gradient boosting decision trees\n")
+            self.estimator = GradientBoostingClassifier(n_estimators=args.ntree, random_state=args.seed, learning_rate=args.lr)
+        elif args.method == 3:
+            print("\nUsing histogram-based gradient boosting decision trees\n")
+            self.estimator = HistGradientBoostingClassifier(max_iter=args.ntree, random_state=args.seed, learning_rate=args.lr, class_weight='balanced')
         else:
             sys.exit("\nError: Wrong method number\n")
 
@@ -439,6 +479,12 @@ def main():
                         help='path to a saved autoencoder checkpoint to use')
     parser.add_argument('--load-vae', type=str, default=None, metavar='PATH',
                         help='path to a saved VAE checkpoint to use')
+    parser.add_argument('--ntree', type=int, default=100, metavar='N',
+                        help='number of trees for tree-based models (default: 100)')
+    parser.add_argument('--lr', type=float, default=0.1, metavar='F',
+                        help='learning rate for gradient boosting (default: 0.1)')
+    parser.add_argument('--test-size', type=float, default=0.2, metavar='F',
+                        help='test set size fraction (default: 0.2)')
     args = parser.parse_args()
 
     prefix = "training"
@@ -460,90 +506,171 @@ def main():
         args.dim = args.latent_dim
     if args.vae:
         args.dim = args.latent_dim
-    model = Cluster(args).model
-
-    # Initialize autoencoder/VAE before the loop to train across all datasets
-    autoencoder = None
-    vae = None
-    ae_input_dim = None
-    vae_input_dim = None
-
-    for iset in range(0, nfiles, data_size):
-        ilast = min(iset + data_size, nfiles)
-        print(f"\nDataset: {iset + 1} to {ilast}\n")
-        dataset = DataWF(args, files[iset:ilast])
-        X_train, y_train = dataset.input, dataset.target
+    
+    # Handle different training types
+    if args.type == 2:
+        # Production mode: Train tree-based classifier on labeled data
+        print("\n=== Type 2: Training Tree-based Classifier ===")
+        
+        # Load all data at once for classification
+        dataset = DataWF(args, files[:nfiles])
+        X = dataset.input
+        y = dataset.target
+        event_ids = dataset.index
+        
+        print(f"\nLoaded {len(X)} labeled events with {X.shape[1]} features")
+        print(f"Number of classes: {len(np.unique(y))}")
+        
+        # Split into train and test sets
+        X_train, X_test, y_train, y_test, idx_train, idx_test = train_test_split(
+            X, y, event_ids, test_size=args.test_size, random_state=args.seed, stratify=y
+        )
+        
+        print(f"\nTrain set: {len(X_train)} events")
+        print(f"Test set: {len(X_test)} events")
+        
+        # Normalize if requested
         if args.norm:
-            print("\nNormalizing input data\n")
+            print("\nNormalizing input data")
             scaler = StandardScaler().fit(X_train)
             X_train = scaler.transform(X_train)
-        if args.pca:
-            print(f"\nApplying PCA: {X_train.shape[1]} -> {args.pca_components} dimensions\n")
-            pca = PCA(n_components=args.pca_components, random_state=args.seed)
-            X_train = pca.fit_transform(X_train)
-        if args.umap:
-            print(f"\nApplying UMAP: {X_train.shape[1]} -> {args.umap_components} dimensions\n")
-            reducer = umap.UMAP(
-                n_components=args.umap_components,
-                n_neighbors=args.umap_neighbors,
-                min_dist=args.umap_min_dist,
-                random_state=args.seed
-            )
-            X_train = reducer.fit_transform(X_train)
-        # Optionally load pre-trained models to get latent space
-        if args.load_autoencoder:
-            print(f"\nLoading Autoencoder from {args.load_autoencoder}\n")
-            ae, in_dim, lat_dim = load_autoencoder(args.load_autoencoder)
-            if in_dim != (X_train.shape[1] if isinstance(X_train, np.ndarray) else X_train.shape[1]):
-                print(f"Warning: checkpoint input_dim {in_dim} != current {X_train.shape[1]}")
-            X_train = latent_from_autoencoder(ae, X_train)
-        if args.load_vae:
-            print(f"\nLoading VAE from {args.load_vae}\n")
-            vae_model, in_dim, lat_dim = load_vae(args.load_vae)
-            if in_dim != (X_train.shape[1] if isinstance(X_train, np.ndarray) else X_train.shape[1]):
-                print(f"Warning: checkpoint input_dim {in_dim} != current {X_train.shape[1]}")
-            X_train = latent_from_vae(vae_model, X_train)
-        if args.autoencoder:
-            input_dim = X_train.shape[1]
-            # Create model on first iteration
-            if autoencoder is None:
-                print(f"\nInitializing Autoencoder: {input_dim} -> {args.latent_dim} dimensions\n")
-                autoencoder = Autoencoder(input_dim, args.latent_dim)
-                ae_input_dim = input_dim
-            print(f"\nTraining Autoencoder on dataset {iset+1}-{ilast}\n")
-            X_train = train_autoencoder(
-                autoencoder, X_train,
-                epochs=args.epochs,
-                batch_size=args.batch_size,
-                learning_rate=args.learning_rate
-            )
-        if args.vae:
-            input_dim = X_train.shape[1]
-            # Create model on first iteration
-            if vae is None:
-                print(f"\nInitializing VAE: {input_dim} -> {args.latent_dim} dimensions\n")
-                vae = VAE(input_dim, args.latent_dim)
-                vae_input_dim = input_dim
-            print(f"\nTraining VAE on dataset {iset+1}-{ilast}\n")
-            X_train = train_vae(
-                vae, X_train,
-                epochs=args.epochs,
-                batch_size=args.batch_size,
-                learning_rate=args.learning_rate
-            )
-        train(args, model, X_train, y_train)
+            X_test = scaler.transform(X_test)
+        
+        # Initialize tree model
+        tree_model = Tree(args)
+        
+        # Train the model
+        print("\nTraining classifier...")
+        tree_model.estimator.fit(X_train, y_train)
+        
+        # Make predictions
+        y_train_pred = tree_model.estimator.predict(X_train)
+        y_test_pred = tree_model.estimator.predict(X_test)
+        
+        # Calculate accuracy
+        train_acc = accuracy_score(y_train, y_train_pred)
+        test_acc = accuracy_score(y_test, y_test_pred)
+        
+        print(f"\n=== Results ===")
+        print(f"Training Accuracy: {train_acc:.4f}")
+        print(f"Test Accuracy: {test_acc:.4f}")
+        
+        print("\n=== Classification Report (Test Set) ===")
+        print(classification_report(y_test, y_test_pred))
+        
+        print("\n=== Confusion Matrix (Test Set) ===")
+        print(confusion_matrix(y_test, y_test_pred))
+        
+        # Save predictions if needed
+        os.makedirs("data", exist_ok=True)
+        pred_path = f"data/predictions-type{args.type}-method{args.method}.txt"
+        with open(pred_path, "w") as f:
+            f.write("# event_id true_label predicted_label\n")
+            for event, true, pred in zip(idx_test, y_test, y_test_pred):
+                f.write(f"{event} {true} {pred}\n")
+        print(f"\nPredictions saved to {pred_path}")
+        
+        # Save model if requested
+        if args.save_model:
+            import pickle
+            os.makedirs(args.model_dir, exist_ok=True)
+            model_path = os.path.join(args.model_dir, f"tree-type{args.type}-method{args.method}.pkl")
+            with open(model_path, 'wb') as f:
+                pickle.dump(tree_model.estimator, f)
+            print(f"\nModel saved to {model_path}")
+            
+            if args.norm:
+                scaler_path = os.path.join(args.model_dir, f"scaler-type{args.type}-method{args.method}.pkl")
+                with open(scaler_path, 'wb') as f:
+                    pickle.dump(scaler, f)
+                print(f"Scaler saved to {scaler_path}")
+        
+    else:
+        # Original clustering workflow (type 0 and 1)
+        model = Cluster(args).model
 
-    # Save final trained models after all datasets
-    if args.save_model:
-        os.makedirs(args.model_dir, exist_ok=True)
-        if args.autoencoder and autoencoder is not None:
-            model_path = os.path.join(args.model_dir, f"autoencoder-type{args.type}-dim{args.latent_dim}.pt")
-            print(f"\nSaving final Autoencoder to {model_path}\n")
-            save_autoencoder(autoencoder, model_path, ae_input_dim, args.latent_dim)
-        if args.vae and vae is not None:
-            model_path = os.path.join(args.model_dir, f"vae-type{args.type}-dim{args.latent_dim}.pt")
-            print(f"\nSaving final VAE to {model_path}\n")
-            save_vae(vae, model_path, vae_input_dim, args.latent_dim)
+        # Initialize autoencoder/VAE before the loop to train across all datasets
+        autoencoder = None
+        vae = None
+        ae_input_dim = None
+        vae_input_dim = None
+
+        for iset in range(0, nfiles, data_size):
+            ilast = min(iset + data_size, nfiles)
+            print(f"\nDataset: {iset + 1} to {ilast}\n")
+            dataset = DataWF(args, files[iset:ilast])
+            X_train, y_train = dataset.input, dataset.target
+            if args.norm:
+                print("\nNormalizing input data\n")
+                scaler = StandardScaler().fit(X_train)
+                X_train = scaler.transform(X_train)
+            if args.pca:
+                print(f"\nApplying PCA: {X_train.shape[1]} -> {args.pca_components} dimensions\n")
+                pca = PCA(n_components=args.pca_components, random_state=args.seed)
+                X_train = pca.fit_transform(X_train)
+            if args.umap:
+                print(f"\nApplying UMAP: {X_train.shape[1]} -> {args.umap_components} dimensions\n")
+                reducer = umap.UMAP(
+                    n_components=args.umap_components,
+                    n_neighbors=args.umap_neighbors,
+                    min_dist=args.umap_min_dist,
+                    random_state=args.seed
+                )
+                X_train = reducer.fit_transform(X_train)
+            # Optionally load pre-trained models to get latent space
+            if args.load_autoencoder:
+                print(f"\nLoading Autoencoder from {args.load_autoencoder}\n")
+                ae, in_dim, lat_dim = load_autoencoder(args.load_autoencoder)
+                if in_dim != (X_train.shape[1] if isinstance(X_train, np.ndarray) else X_train.shape[1]):
+                    print(f"Warning: checkpoint input_dim {in_dim} != current {X_train.shape[1]}")
+                X_train = latent_from_autoencoder(ae, X_train)
+            if args.load_vae:
+                print(f"\nLoading VAE from {args.load_vae}\n")
+                vae_model, in_dim, lat_dim = load_vae(args.load_vae)
+                if in_dim != (X_train.shape[1] if isinstance(X_train, np.ndarray) else X_train.shape[1]):
+                    print(f"Warning: checkpoint input_dim {in_dim} != current {X_train.shape[1]}")
+                X_train = latent_from_vae(vae_model, X_train)
+            if args.autoencoder:
+                input_dim = X_train.shape[1]
+                # Create model on first iteration
+                if autoencoder is None:
+                    print(f"\nInitializing Autoencoder: {input_dim} -> {args.latent_dim} dimensions\n")
+                    autoencoder = Autoencoder(input_dim, args.latent_dim)
+                    ae_input_dim = input_dim
+                print(f"\nTraining Autoencoder on dataset {iset+1}-{ilast}\n")
+                X_train = train_autoencoder(
+                    autoencoder, X_train,
+                    epochs=args.epochs,
+                    batch_size=args.batch_size,
+                    learning_rate=args.learning_rate
+                )
+            if args.vae:
+                input_dim = X_train.shape[1]
+                # Create model on first iteration
+                if vae is None:
+                    print(f"\nInitializing VAE: {input_dim} -> {args.latent_dim} dimensions\n")
+                    vae = VAE(input_dim, args.latent_dim)
+                    vae_input_dim = input_dim
+                print(f"\nTraining VAE on dataset {iset+1}-{ilast}\n")
+                X_train = train_vae(
+                    vae, X_train,
+                    epochs=args.epochs,
+                    batch_size=args.batch_size,
+                    learning_rate=args.learning_rate
+                )
+            train(args, model, X_train, y_train)
+
+        # Save final trained models after all datasets
+        if args.save_model:
+            os.makedirs(args.model_dir, exist_ok=True)
+            if args.autoencoder and autoencoder is not None:
+                model_path = os.path.join(args.model_dir, f"autoencoder-type{args.type}-dim{args.latent_dim}.pt")
+                print(f"\nSaving final Autoencoder to {model_path}\n")
+                save_autoencoder(autoencoder, model_path, ae_input_dim, args.latent_dim)
+            if args.vae and vae is not None:
+                model_path = os.path.join(args.model_dir, f"vae-type{args.type}-dim{args.latent_dim}.pt")
+                print(f"\nSaving final VAE to {model_path}\n")
+                save_vae(vae, model_path, vae_input_dim, args.latent_dim)
 
 
 if __name__ == '__main__':

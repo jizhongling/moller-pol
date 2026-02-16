@@ -15,6 +15,7 @@ void AnaWaveform(const Int_t proc = 0)
   Float_t ntp_gaus_mean[4][np], ntp_gaus_sigma[4][np], ntp_gaus_amplitude[4][np], ntp_gaus_diff[6][np];
   Float_t ntp_plot_mean[8][np], ntp_plot_sigma[8][np], ntp_plot_amplitude[8][np];
   Float_t ntp_area_sum;
+  Int_t ntp_pinteg[4][4], ntp_ptime[4][4], ntp_pped[4][4], ntp_ppeak[4][4], ntp_pdiff[6][4];
   auto f_out = new TFile(Form("data/training-%d.root", proc), "RECREATE");
   auto t_out = new TTree("T", "Waveform data");
   t_out->Branch("event", &ntp_event, "event/I");
@@ -46,14 +47,32 @@ void AnaWaveform(const Int_t proc = 0)
       t_out->Branch(Form("gaus_diff_ch%d_p%d", ich, ip), &ntp_gaus_diff[ich][ip], Form("gaus_diff_ch%d_p%d/F", ich, ip));
     }
   t_out->Branch("area_sum", &ntp_area_sum, "area_sum/F");
+  for (Int_t ich = 0; ich < 4; ich++)
+    for (Int_t ip = 0; ip < 4; ip++)
+    {
+      t_out->Branch(Form("pinteg_ch%d_p%d", ich, ip), &ntp_pinteg[ich][ip], Form("pinteg_ch%d_p%d/I", ich, ip));
+      t_out->Branch(Form("ptime_ch%d_p%d", ich, ip), &ntp_ptime[ich][ip], Form("ptime_ch%d_p%d/I", ich, ip));
+      t_out->Branch(Form("pped_ch%d_p%d", ich, ip), &ntp_pped[ich][ip], Form("pped_ch%d_p%d/I", ich, ip));
+      t_out->Branch(Form("ppeak_ch%d_p%d", ich, ip), &ntp_ppeak[ich][ip], Form("ppeak_ch%d_p%d/I", ich, ip));
+    }
+  for (Int_t ich = 0; ich < 6; ich++)
+    for (Int_t ip = 0; ip < 4; ip++)
+    {
+      t_out->Branch(Form("pdiff_ch%d_p%d", ich, ip), &ntp_pdiff[ich][ip], Form("pdiff_ch%d_p%d/I", ich, ip));
+    }
 
   auto f = new TFile(Form("Rootfiles/fadc_data_%d.root", runnumber));
   TDirectory *dir = (TDirectory *)f->Get(Form("/mode_%u_data/slot_%u", mode, slot));
   TTree *t_store = (TTree *)dir->Get("waveform");
   UInt_t store_event, store_channel, store_sample[100];
+  UInt_t store_pinteg[4], store_ptime[4], store_pped[4], store_ppeak[4];
   t_store->SetBranchAddress("event", &store_event);
   t_store->SetBranchAddress("channel", &store_channel);
   t_store->SetBranchAddress("sample", store_sample);
+  t_store->SetBranchAddress("pinteg", store_pinteg);
+  t_store->SetBranchAddress("ptime", store_ptime);
+  t_store->SetBranchAddress("pped", store_pped);
+  t_store->SetBranchAddress("ppeak", store_ppeak);
 
   UInt_t last_event = 0;
   UInt_t total_channel = 0;
@@ -65,6 +84,10 @@ void AnaWaveform(const Int_t proc = 0)
   vector<vector<Int_t>> peak(8);
   vector<vector<Int_t>> fwhm(8);
   vector<vector<Int_t>> area(8);
+  vector<vector<Int_t>> pinteg(8);
+  vector<vector<Int_t>> ptime(8);
+  vector<vector<Int_t>> pped(8);
+  vector<vector<Int_t>> ppeak(8);
   UInt_t max_index[8] = {};
   UInt_t max_sample[8] = {};
   Float_t sum_sample[8] = {};
@@ -99,6 +122,17 @@ void AnaWaveform(const Int_t proc = 0)
       ntp_gaus_diff[ic][ip] = 0;
     }
   ntp_area_sum = 0;
+  for (Int_t ic = 0; ic < 4; ic++)
+    for (Int_t ip = 0; ip < 4; ip++)
+    {
+      ntp_pinteg[ic][ip] = 0;
+      ntp_ptime[ic][ip] = 0;
+      ntp_pped[ic][ip] = 0;
+      ntp_ppeak[ic][ip] = 0;
+    }
+  for (Int_t ic = 0; ic < 6; ic++)
+    for (Int_t ip = 0; ip < 4; ip++)
+      ntp_pdiff[ic][ip] = 0;
 
   for (ULong64_t ien = 0; ien < t_store->GetEntries(); ien++)
   {
@@ -212,6 +246,14 @@ void AnaWaveform(const Int_t proc = 0)
                 ntp_gaus_sigma[ntp_chan][ip] = ntp_plot_sigma[chan][ip] = 0;
               }
             }
+
+            for (size_t ip = 0; ip < 4; ip++)
+            {
+              ntp_pinteg[ntp_chan][ip] = pinteg[chan][ip];
+              ntp_ptime[ntp_chan][ip] = ptime[chan][ip];
+              ntp_pped[ntp_chan][ip] = pped[chan][ip];
+              ntp_ppeak[ntp_chan][ip] = ppeak[chan][ip];
+            }
           } // time[chan].size() > 0
         } // chan loop
 
@@ -246,6 +288,22 @@ void AnaWaveform(const Int_t proc = 0)
             ntp_gaus_diff[5][ip] = TMath::Abs(ntp_gaus_mean[1][ip] - ntp_gaus_mean[2][ip]);
         }
 
+        for (UInt_t ip = 0; ip < 4; ip++)
+        {
+          if (ntp_ptime[0][ip] > 0 && ntp_ptime[1][ip] > 0)
+            ntp_pdiff[0][ip] = TMath::Abs(ntp_ptime[0][ip] - ntp_ptime[1][ip]);
+          if (ntp_ptime[2][ip] > 0 && ntp_ptime[3][ip] > 0)
+            ntp_pdiff[1][ip] = TMath::Abs(ntp_ptime[2][ip] - ntp_ptime[3][ip]);
+          if (ntp_ptime[0][ip] > 0 && ntp_ptime[2][ip] > 0)
+            ntp_pdiff[2][ip] = TMath::Abs(ntp_ptime[0][ip] - ntp_ptime[2][ip]);
+          if (ntp_ptime[1][ip] > 0 && ntp_ptime[3][ip] > 0)
+            ntp_pdiff[3][ip] = TMath::Abs(ntp_ptime[1][ip] - ntp_ptime[3][ip]);
+          if (ntp_ptime[0][ip] > 0 && ntp_ptime[3][ip] > 0)
+            ntp_pdiff[4][ip] = TMath::Abs(ntp_ptime[0][ip] - ntp_ptime[3][ip]);
+          if (ntp_ptime[1][ip] > 0 && ntp_ptime[2][ip] > 0)
+            ntp_pdiff[5][ip] = TMath::Abs(ntp_ptime[1][ip] - ntp_ptime[2][ip]);
+        }
+
         if (normalize)
           for (Int_t ich = 0; ich < 4; ich++)
             for (size_t ip = 0; ip < np; ip++)
@@ -273,6 +331,10 @@ void AnaWaveform(const Int_t proc = 0)
         peak[ic].clear();
         fwhm[ic].clear();
         area[ic].clear();
+        pinteg[ic].clear();
+        ptime[ic].clear();
+        pped[ic].clear();
+        ppeak[ic].clear();
       }
       for (Int_t ic = 0; ic < 4; ic++)
       {
@@ -303,6 +365,17 @@ void AnaWaveform(const Int_t proc = 0)
           ntp_gaus_diff[ic][ip] = 0;
         }
       ntp_area_sum = 0;
+      for (Int_t ic = 0; ic < 4; ic++)
+        for (Int_t ip = 0; ip < 4; ip++)
+        {
+          ntp_pinteg[ic][ip] = 0;
+          ntp_ptime[ic][ip] = 0;
+          ntp_pped[ic][ip] = 0;
+          ntp_ppeak[ic][ip] = 0;
+        }
+      for (Int_t ic = 0; ic < 6; ic++)
+        for (Int_t ip = 0; ip < 4; ip++)
+          ntp_pdiff[ic][ip] = 0;
       for (Int_t it = 0; it < 2; it++)
         trig[it] = 0;
 
@@ -400,6 +473,14 @@ void AnaWaveform(const Int_t proc = 0)
           is = plateau_end;
         }
       } // is
+
+      for (Int_t ip = 0; ip < 4; ip++)
+      {
+        pinteg[store_channel].push_back(store_pinteg[ip]);
+        ptime[store_channel].push_back(store_ptime[ip]);
+        pped[store_channel].push_back(store_pped[ip]);
+        ppeak[store_channel].push_back(store_ppeak[ip]);
+      }
     } // PMT channels
 
     total_channel++;

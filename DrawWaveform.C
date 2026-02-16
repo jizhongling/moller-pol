@@ -2,8 +2,8 @@ void DrawWaveform()
 {
   gErrorIgnoreLevel = kError;
   Int_t runnumber = 242;
-  const Int_t method[2] = {2, 0}; // Cluster with method[0], recluster with method[1]
-  const Int_t start_type = 0;     // 0: Do not recluster; 1: Recluster with method[1]
+  const Int_t method[3] = {2, 0, 3}; // Cluster with method[0], recluster with method[1], predictions with method[2]
+  const Int_t start_type = 2;        // 0: Do not recluster; 1: Recluster with method[1]; 2: Use predictions with method[2]
 
   const UInt_t mode = 10;
   const UInt_t slot = 3;
@@ -30,10 +30,11 @@ void DrawWaveform()
   ifstream infile;
   Int_t event, label;
   map<Int_t, Int_t> event_label;
+  map<Int_t, Int_t> event_true_label; // Store true labels for display
   multimap<Int_t, Int_t> label_event;
   map<Int_t, Int_t> label_count;
 
-  for (Int_t type = start_type; type >= 0; type--)
+  for (Int_t type = start_type; type >= 0 && type <= 1; type--)
   {
     TString label_file = Form("data/labels-type%d-method%d.txt", type, method[type]);
     infile.open(label_file.Data());
@@ -51,6 +52,32 @@ void DrawWaveform()
           label_count[label] = 1;
       }
     infile.close();
+  }
+
+  for (Int_t type = start_type; type >= 2; type--)
+  {
+    // Read predictions file with true_label and predicted_label
+    TString pred_file = Form("data/predictions-type%d-method%d.txt", type, method[type]);
+    infile.open(pred_file.Data());
+    if (infile.is_open())
+    {
+      cout << "Open predictions file: " << pred_file << endl;
+      string line;
+      getline(infile, line); // Skip header line
+      Int_t true_label, predicted_label;
+      while (infile >> event >> true_label >> predicted_label)
+      {
+        if (event_label.find(event) == event_label.end())
+        {
+          event_label[event] = predicted_label; // Use predicted_label for classification
+          event_true_label[event] = true_label; // Store true_label for display
+          label_event.insert(pair<Int_t, Int_t>(predicted_label, event));
+          if (label_count.find(predicted_label) == label_count.end())
+            label_count[predicted_label] = 1;
+        }
+      }
+      infile.close();
+    }
   }
 
   auto f = new TFile(Form("Rootfiles/fadc_data_%d.root", runnumber));
@@ -122,8 +149,22 @@ void DrawWaveform()
   Float_t ped[8] = {};
   bool trig[2] = {};
 
-  cout << "Plotting waveform for run " << runnumber << ", classified by method " << method[0] << " and " << method[1] << endl;
-  TString wavefile = Form("plots/Waveform-run%d-method%d-method%d", runnumber, method[0], method[1]);
+  TString wavefile;
+  if (start_type <= 1)
+  {
+    cout << "Plotting waveform for run " << runnumber << ", classified by method " << method[0] << " and " << method[1] << endl;
+    TString wavefile = Form("plots/Waveform-run%d-method%d-method%d", runnumber, method[0], method[1]);
+  }
+  else if (start_type == 2)
+  {
+    cout << "Plotting waveform for run " << runnumber << ", classified by predictions from method " << method[2] << endl;
+    wavefile = Form("plots/Waveform-run%d-predictions-method%d", runnumber, method[2]);
+  }
+  else
+  {
+    cout << "Invalid start_type: " << start_type << ". Must be 0, 1, or 2." << endl;
+    return;
+  }
 
   for (ULong64_t ien = 0; ien < t_store->GetEntries(); ien++)
   {
@@ -133,10 +174,8 @@ void DrawWaveform()
 
     if (store_event != last_event)
     {
-      if (trig[0] && trig[1])
+      if (trig[0] && trig[1] && event_label.find(last_event) != event_label.end())
       {
-        if (event_label.find(last_event) == event_label.end())
-          continue;
         Int_t label = event_label[last_event];
 
         auto ctmp = new TCanvas(Form("c_label%d_event%u", label, last_event), Form("c_label%d_event%u", label, last_event), 600, 600);
@@ -163,6 +202,12 @@ void DrawWaveform()
             latex->SetTextAlign(31); // right-aligned
             latex->SetTextSize(0.035);
             latex->DrawLatex(0.9, 0.85, Form("Area = %.2E", area_sum));
+            // Display true_label if available
+            if (event_true_label.find(last_event) != event_true_label.end())
+            {
+              Int_t true_lbl = event_true_label[last_event];
+              latex->DrawLatex(0.9, 0.80, Form("True Label = %d", true_lbl));
+            }
           }
           first = false;
         }
@@ -227,7 +272,7 @@ void DrawWaveform()
           sum_right += sum_sample[ic];
         h_sum[1]->Fill(sum_right);
         h_sum[2]->Fill(sum_left + sum_right);
-      } // trig[0] && trig[1]
+      } // trig[0] && trig[1] && label exists
 
       if (max_sample_1 > threshold || max_sample_2 > threshold)
         event_1or2++;
