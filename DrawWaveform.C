@@ -1,9 +1,32 @@
+bool IsOutlier(Int_t label, Float_t area_sum)
+{
+  const Float_t threshold = 8000; // Define threshold for outlier classification based on area_sum
+  switch (label)
+  {
+  case 0:
+    return area_sum > threshold;
+  case 1:
+    return area_sum < threshold;
+  case 2:
+    return area_sum > threshold;
+  case 3:
+    return area_sum > threshold;
+  case 4:
+    return area_sum < threshold;
+  case 5:
+    return area_sum > threshold;
+  default:
+    return false; // Not an outlier for other labels
+  }
+}
+
 void DrawWaveform()
 {
   gErrorIgnoreLevel = kError;
   Int_t runnumber = 242;
   const Int_t method[3] = {2, 0, 3}; // Cluster with method[0], recluster with method[1], predictions with method[2]
-  const Int_t start_type = 2;        // 0: Do not recluster; 1: Recluster with method[1]; 2: Use predictions with method[2]
+  const Int_t start_type = 0;        // 0: Do not recluster; 1: Recluster with method[1]; 2: Use predictions with method[2]
+  const bool print_outliers = true;  // Set to true to print only outlier events based on area_sum and label
 
   const UInt_t mode = 10;
   const UInt_t slot = 3;
@@ -153,7 +176,7 @@ void DrawWaveform()
   if (start_type <= 1)
   {
     cout << "Plotting waveform for run " << runnumber << ", classified by method " << method[0] << " and " << method[1] << endl;
-    TString wavefile = Form("plots/Waveform-run%d-method%d-method%d", runnumber, method[0], method[1]);
+    wavefile = Form("plots/Waveform-run%d-method%d-method%d", runnumber, method[0], method[1]);
   }
   else if (start_type == 2)
   {
@@ -164,6 +187,11 @@ void DrawWaveform()
   {
     cout << "Invalid start_type: " << start_type << ". Must be 0, 1, or 2." << endl;
     return;
+  }
+  if (print_outliers)
+  {
+    cout << "Only printing outlier events based on area_sum and label criteria." << endl;
+    wavefile += "-outliers";
   }
 
   for (ULong64_t ien = 0; ien < t_store->GetEntries(); ien++)
@@ -244,11 +272,15 @@ void DrawWaveform()
         leg0->Draw();
 
         // cout << "Event " << last_event << ", Label " << label << endl;
-        if (label_count[label] == 1)
-          ctmp->Print(wavefile + Form("-label%d.pdf(", label));
-        else
-          ctmp->Print(wavefile + Form("-label%d.pdf", label));
-        label_count[label]++;
+        bool is_outlier = event_area_sum.find(last_event) != event_area_sum.end() && IsOutlier(label, event_area_sum[last_event]);
+        if (!print_outliers || is_outlier)
+        {
+          if (label_count[label] == 1)
+            ctmp->Print(wavefile + Form("-label%d.pdf(", label));
+          else
+            ctmp->Print(wavefile + Form("-label%d.pdf", label));
+          label_count[label]++;
+        }
         ctmp->Close();
 
         // Clean up Gaussian functions

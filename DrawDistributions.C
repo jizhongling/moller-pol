@@ -130,6 +130,24 @@ void DrawDistributions()
       }
     }
 
+    // Plot 2D distribution: abs(time_ch0_p0 - time_ch1_p0) vs area_sum
+    {
+      c->SetLogy(0);
+      Int_t ch1 = label_id == 2 ? 2 : 1;
+      tree->Draw(Form("abs(time_ch0_p0-time_ch%d_p0):area_sum>>h2_tdiff_vs_area_label%d(300,0,15000,50,0,50)", ch1, label_id), "", "COLZ");
+      TH2F *h2 = (TH2F *)gDirectory->Get(Form("h2_tdiff_vs_area_label%d", label_id));
+      if (h2 && h2->GetEntries() > 0)
+      {
+        h2->SetTitle(Form("Label %d: |time_ch0_p0 - time_ch1_p0| vs area_sum;area_sum;|time_ch0_p0 - time_ch1_p0|", label_id));
+        h2->Draw("COLZ");
+        c->Update();
+        c->Print(pdf_name.Data());
+        page_count++;
+        delete h2;
+      }
+      c->SetLogy(1);
+    }
+
     // Plot amplitude branches for this label
     for (auto &branch_name : amplitude_branches)
     {
