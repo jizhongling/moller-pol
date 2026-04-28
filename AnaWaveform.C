@@ -199,6 +199,8 @@ void AnaWaveform(const Int_t proc = 0)
             for (Int_t is = 0; is < NUMSAMPLE; is++)
               ntp_sample[ntp_chan][is] = sample[chan].at(is);
 
+            ntp_area_sum += sum_sample[chan];
+
             // Fit Gaussian around peaks
             for (size_t ip = 0; ip < idx.size() && ip < np; ip++)
             {
@@ -207,7 +209,6 @@ void AnaWaveform(const Int_t proc = 0)
               ntp_peak[ntp_chan][ip] = max(peak[chan].at(ip_sorted), 0);
               ntp_fwhm[ntp_chan][ip] = max(fwhm[chan].at(ip_sorted), 0);
               ntp_area[ntp_chan][ip] = max(area[chan].at(ip_sorted), 0);
-              ntp_area_sum += ntp_area[ntp_chan][ip];
 
               // Gaussian fit around peak
               Int_t peak_time = time[chan].at(ip_sorted);

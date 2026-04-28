@@ -1,6 +1,6 @@
 bool IsOutlier(Int_t label, Float_t area_sum)
 {
-  const Float_t threshold = 8000; // Define threshold for outlier classification based on area_sum
+  const Float_t threshold = 9000; // Define threshold for outlier classification based on area_sum
   switch (label)
   {
   case 0:
@@ -26,7 +26,7 @@ void DrawWaveform()
   Int_t runnumber = 242;
   const Int_t method[3] = {2, 0, 3}; // Cluster with method[0], recluster with method[1], predictions with method[2]
   const Int_t start_type = 0;        // 0: Do not recluster; 1: Recluster with method[1]; 2: Use predictions with method[2]
-  const bool print_outliers = true;  // Set to true to print only outlier events based on area_sum and label
+  const bool print_outliers = false; // Set to true to print only outlier events based on area_sum and label
 
   const UInt_t mode = 10;
   const UInt_t slot = 3;

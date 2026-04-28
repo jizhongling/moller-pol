@@ -114,7 +114,7 @@ void DrawDistributions()
     // Plot area branches for this label
     for (auto &branch_name : area_branches)
     {
-      tree->Draw(Form("%s>>h_%s_label%d(300,0,15000)", branch_name.Data(), branch_name.Data(), label_id), "", "");
+      tree->Draw(Form("%s>>h_%s_label%d(400,0,20000)", branch_name.Data(), branch_name.Data(), label_id), "", "");
       TH1F *h = (TH1F *)gDirectory->Get(Form("h_%s_label%d", branch_name.Data(), label_id));
       if (h && h->GetEntries() > 0)
       {
@@ -134,7 +134,7 @@ void DrawDistributions()
     {
       c->SetLogy(0);
       Int_t ch1 = label_id == 2 ? 2 : 1;
-      tree->Draw(Form("abs(time_ch0_p0-time_ch%d_p0):area_sum>>h2_tdiff_vs_area_label%d(300,0,15000,50,0,50)", ch1, label_id), "", "COLZ");
+      tree->Draw(Form("abs(time_ch0_p0-time_ch%d_p0):area_sum>>h2_tdiff_vs_area_label%d(400,0,20000,50,0,50)", ch1, label_id), "", "COLZ");
       TH2F *h2 = (TH2F *)gDirectory->Get(Form("h2_tdiff_vs_area_label%d", label_id));
       if (h2 && h2->GetEntries() > 0)
       {
