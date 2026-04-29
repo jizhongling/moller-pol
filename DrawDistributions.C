@@ -168,12 +168,20 @@ void DrawDistributions()
     }
 
     // Plot mean branches for this label
+    Double_t prob_ch0_p0 = 0, prob_ch1_p0 = 0;
     for (auto &branch_name : mean_branches)
     {
       tree->Draw(Form("%s>>h_%s_label%d(100,0,40)", branch_name.Data(), branch_name.Data(), label_id), "", "");
       TH1F *h = (TH1F *)gDirectory->Get(Form("h_%s_label%d", branch_name.Data(), label_id));
       if (h && h->GetEntries() > 0)
       {
+        Double_t frac = (h->Integral(h->FindBin(5), h->FindBin(17)) + h->Integral(h->FindBin(22), h->FindBin(34))) /
+                        h->Integral(h->FindBin(17), h->FindBin(20)) / (24. / 3.);
+        if (branch_name.Contains("ch0_p0"))
+          prob_ch0_p0 = frac;
+        else if (branch_name.Contains("ch1_p0"))
+          prob_ch1_p0 = frac;
+
         h->SetTitle(Form("Label %d: %s Distribution;%s;Counts", label_id, branch_name.Data(), branch_name.Data()));
         h->SetLineColor(kRed);
         h->SetLineWidth(2);
@@ -185,6 +193,8 @@ void DrawDistributions()
         delete h;
       }
     }
+    cout << "  Accidental contamination in the coincidence window for label " << label_id << " = "
+         << prob_ch0_p0 << " * " << prob_ch1_p0 << " = " << prob_ch0_p0 * prob_ch1_p0 << endl;
 
     // Plot sigma branches for this label
     for (auto &branch_name : sigma_branches)
